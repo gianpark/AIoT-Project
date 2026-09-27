@@ -1,0 +1,22 @@
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# 모델 파일은 용량이 커서 git에 안 올리고 각자 Kaggle에서 받는다 (README 참고)
+models/*.tflite
+
+# 수집한 원본 이미지/영상은 git에 안 올린다 (개인정보 + 용량)
+data/raw/
+
+# 로컬 로그/캐시
+*.log
+*.csv
+!requirements.txt
+
+# 발표자료 QA용으로 렌더링한 슬라이드 이미지 (pptx에서 다시 뽑으면 됨)
+slide-*.jpg
+__pycache__/
+

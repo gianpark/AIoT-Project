@@ -1,0 +1,21 @@
+# 바른자세 프로젝트 — 파이썬 의존성
+# 설치: pip install -r requirements.txt
+# (팀원 노트북이 Raspberry Pi가 아니라 일반 PC이므로 tflite-runtime이 안 깔리면
+#  아래 tensorflow로 대체해도 됨 — 코드는 둘 다 자동으로 시도하게 되어 있음)
+
+# 카메라 입력 + 영상 처리 + 스테레오 캘리브레이션(추후)
+opencv-python==4.13.0.92
+numpy==2.4.4
+
+# MoveNet 포즈 추정 (TFLite 인터프리터만 필요, 학습 프레임워크 전체는 불필요)
+tflite-runtime==2.14.0
+# tflite-runtime 설치가 안 되는 환경(Python 3.12+ 등)이면 대신:
+# tensorflow==2.16.1
+
+# --- 아래는 6주차 이후(분류기 학습 단계)부터 필요, 지금은 안 깔아도 됨 ---
+# scikit-learn==1.8.0   # RF 기준모델
+# xgboost               # 7주차 공정비교
+# lightgbm              # 7주차 공정비교
+
+# --- 8~9주차 이후(TTS 알림) 필요, 지금은 안 깔아도 됨 ---
+# pyttsx3
