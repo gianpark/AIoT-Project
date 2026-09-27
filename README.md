@@ -28,6 +28,23 @@ pip install -r requirements.txt
 
 - https://www.kaggle.com/models/google/movenet/tfLite/singlepose-lightning-tflite-int8
 
+## 실행
+
+프로젝트 루트에서, 모듈(`-m`)로 실행한다 (내부에서 `src.features...`를 절대경로로
+import하기 때문에 `src/pose/movenet_keypoints.py`를 직접 실행하면 안 됨):
+
+```bash
+python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflite
+```
+
+## 테스트
+
+카메라·모델 없이 검증 가능한 로직(정규화, 각도 계산 등)은 `tests/`에 있다:
+
+```bash
+python -m pytest tests/
+```
+
 ## 폴더 구조
 
 ```

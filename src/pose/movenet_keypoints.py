@@ -8,15 +8,15 @@
    17개 keypoint를 실시간 추출하고 화면에 스켈레톤을 그려 보여준다.
 2) 각 keypoint의 confidence를 CSV로 기록한다 — "상반신만 보이는 책상 구도에서
    어떤 keypoint를 신뢰할 수 있는가"를 실측으로 검증하기 위한 기초 데이터다.
-3) project.md 5장 1단계에서 정의한 특징 추출(엉덩이 중심 정규화 + 어깨너비
-   스케일링)을 구현해, RF 학습에 바로 넘길 수 있는 특징 벡터를 만든다.
+
+특징 추출(정규화·각도 계산)은 src/features/posture_features.py로 분리되어 있다
+— 이 모듈은 "포즈 추정" 담당, 그쪽은 "특징 엔지니어링" 담당으로 역할을 나눴다.
 
 모델 준비
 --------
 이 스크립트는 TFLite 형식의 MoveNet SinglePose Lightning 모델 파일이 필요하다.
 TensorFlow Hub의 모델 배포처가 Kaggle Models로 통합되어, 지금은 아래 Kaggle
-페이지가 공식 다운로드 경로다 (본 개발 환경은 네트워크 제한으로 직접 받을 수
-없어 코드만 준비해두었다. 실제 노트북에서 받으면 된다):
+페이지가 공식 다운로드 경로다:
 
     # https://www.kaggle.com/models/google/movenet/tfLite/singlepose-lightning-tflite-int8
     # 위 페이지에서 "Download" 받은 .tflite 파일을 models/ 아래에 둔다.
@@ -28,18 +28,15 @@ TensorFlow Hub의 모델 배포처가 Kaggle Models로 통합되어, 지금은 �
 
 의존성
 ------
-    pip install tflite-runtime opencv-python numpy
-    # tflite-runtime이 설치가 안 되는 환경(일부 Windows)이면 대신
-    #   pip install tensorflow
-    # 을 설치하면 tensorflow.lite.Interpreter로 자동 대체된다.
+    pip install -r requirements.txt
 
-실행 예시
+실행 예시 (프로젝트 루트에서, 패키지로 실행)
 --------
     # 웹캠으로 실시간 확인 (q로 종료)
-    python movenet_keypoints.py --model models/movenet_lightning_int8.tflite
+    python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflite
 
     # confidence 로그를 CSV로 저장 (카메라 프레이밍/keypoint 신뢰도 검증용)
-    python movenet_keypoints.py --model models/movenet_lightning_int8.tflite \
+    python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflite \
         --log keypoint_confidence_log.csv --camera 0
 """
 
@@ -50,7 +47,6 @@ import csv
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
@@ -61,9 +57,13 @@ except ImportError as exc:  # pragma: no cover
         "opencv-python이 필요합니다: pip install opencv-python"
     ) from exc
 
+from src.features.posture_features import compute_posture_features
+
 
 # ---------------------------------------------------------------------------
 # MoveNet(COCO) 17키포인트 순서 — 모델 출력이 항상 이 순서로 나온다.
+# 어떤 keypoint를 실제로 쓸지(상반신/전신)는 src/features/posture_features.py의
+# UPPER_BODY_IDX/LOWER_BODY_IDX 참고.
 # ---------------------------------------------------------------------------
 KEYPOINT_NAMES = [
     "nose",
@@ -76,11 +76,6 @@ KEYPOINT_NAMES = [
     "left_knee", "right_knee",
     "left_ankle", "right_ankle",
 ]
-
-# 책상 착석 구도에서 "일단 상반신 위주"로 다룰 때 참고할 인덱스 그룹.
-# 실제 채택 여부는 확보한 confidence 로그로 검증한 뒤 확정한다(project.md 5장 참고).
-UPPER_BODY_IDX = list(range(0, 13))  # nose ~ hip (Pawitra et al. 2026 과 동일 기준)
-LOWER_BODY_IDX = list(range(13, 17))  # knee, ankle — 책상 구도에서는 대체로 신뢰 불가
 
 # 스켈레톤을 그릴 때 이을 keypoint 쌍
 SKELETON_EDGES = [
@@ -153,68 +148,6 @@ class MoveNetExtractor:
             Keypoint(name=KEYPOINT_NAMES[i], y=float(raw[i, 0]), x=float(raw[i, 1]), score=float(raw[i, 2]))
             for i in range(17)
         ]
-
-
-def filter_by_confidence(keypoints: list[Keypoint], threshold: float) -> list[Optional[Keypoint]]:
-    """threshold 미만인 keypoint는 None으로 바꿔 이후 계산에서 제외한다."""
-    return [kp if kp.score >= threshold else None for kp in keypoints]
-
-
-def normalize_keypoints(keypoints: list[Keypoint]) -> Optional[np.ndarray]:
-    """
-    project.md 5장 1단계: 엉덩이(hip) 중심으로 원점 이동 + 어깨너비로 스케일 정규화.
-
-    반환값: (17, 2) 배열 (정규화된 x, y). 엉덩이가 안 보여 계산이 불가능하면 None.
-    """
-    left_hip, right_hip = keypoints[11], keypoints[12]
-    left_shoulder, right_shoulder = keypoints[5], keypoints[6]
-
-    if min(left_hip.score, right_hip.score, left_shoulder.score, right_shoulder.score) < 1e-6:
-        # 이 함수는 순수 정규화용이라 confidence 필터링은 호출부에서 이미 했다고 가정하되,
-        # 완전히 0점(=탐지 자체가 안 된 경우)만 최소 방어한다.
-        pass
-
-    hip_center = np.array([(left_hip.x + right_hip.x) / 2.0, (left_hip.y + right_hip.y) / 2.0])
-    shoulder_width = float(np.hypot(left_shoulder.x - right_shoulder.x, left_shoulder.y - right_shoulder.y))
-
-    if shoulder_width < 1e-6:
-        return None  # 어깨가 겹쳐 보이거나 검출 실패 — 스케일 기준으로 못 씀
-
-    coords = np.array([[kp.x, kp.y] for kp in keypoints])
-    normalized = (coords - hip_center) / shoulder_width
-    return normalized
-
-
-def angle_deg(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
-    """세 점 a-b-c에서 b를 꼭짓점으로 하는 각도(도)를 계산한다."""
-    ba = a - b
-    bc = c - b
-    cos_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-9)
-    cos_angle = np.clip(cos_angle, -1.0, 1.0)
-    return float(np.degrees(np.arccos(cos_angle)))
-
-
-def compute_posture_features(keypoints: list[Keypoint]) -> Optional[dict]:
-    """
-    정규화된 keypoint로부터 자세 판단에 쓸 각도/거리 특징 몇 가지를 계산한다.
-    (RF 학습용 전체 특징 세트는 6주차에 실측 데이터로 확정 — 여기서는 뼈대만 제공)
-    """
-    normalized = normalize_keypoints(keypoints)
-    if normalized is None:
-        return None
-
-    nose, l_sh, r_sh, l_hip, r_hip = (
-        normalized[0], normalized[5], normalized[6], normalized[11], normalized[12]
-    )
-    neck = (l_sh + r_sh) / 2.0
-    hip_center = (l_hip + r_hip) / 2.0
-
-    return {
-        "neck_tilt_deg": angle_deg(nose, neck, neck + np.array([1.0, 0.0])),  # 목 좌우 기울임
-        "torso_lean_deg": angle_deg(neck, hip_center, hip_center + np.array([0.0, -1.0])),  # 상체 앞뒤 기울임
-        "shoulder_slope_deg": angle_deg(l_sh, neck, r_sh),  # 어깨 좌우 비대칭
-        "nose_to_hip_dist": float(np.linalg.norm(nose - hip_center)),  # 화면과의 거리 대용(가까워지면 값이 커짐)
-    }
 
 
 def draw_skeleton(frame: np.ndarray, keypoints: list[Keypoint], threshold: float) -> np.ndarray:
