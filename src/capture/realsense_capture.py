@@ -61,6 +61,12 @@ DEFAULT_WIDTH = 848
 DEFAULT_HEIGHT = 480
 DEFAULT_FPS = 30
 
+# D455 depth 유효 측정 범위(스펙상 약 0.6~6m). 이 범위 밖 값은 스테레오 매칭 실패로
+# 인한 무효값(0 또는 필터를 거치며 생기는 uint16 최대치 65.535m 등)이라 화면에
+# "invalid"로 표시하고 숫자 그대로는 보여주지 않는다.
+MIN_VALID_DEPTH_M = 0.3
+MAX_VALID_DEPTH_M = 8.0
+
 
 class RealSenseCamera:
     """RealSense 파이프라인을 감싸는 얇은 래퍼 - depth+color 동기화 스트림."""
@@ -170,9 +176,13 @@ def _view_mode(args: argparse.Namespace) -> None:
                 if dt > 0:
                     fps_smoothed = 0.9 * fps_smoothed + 0.1 * (1.0 / dt)
 
+                is_valid = MIN_VALID_DEPTH_M <= distance <= MAX_VALID_DEPTH_M
+                distance_text = f"distance: {distance:.3f} m" if is_valid else "distance: invalid (범위 밖, 0.6~6m 이내로 다시 측정)"
+                text_color = (255, 255, 255) if is_valid else (0, 0, 255)
+
                 cv2.drawMarker(color_image, (cx, cy), (0, 255, 170), cv2.MARKER_CROSS, 20, 2)
-                cv2.putText(color_image, f"distance: {distance:.3f} m", (10, 24),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+                cv2.putText(color_image, distance_text, (10, 24),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2, cv2.LINE_AA)
                 cv2.putText(color_image, f"fps: {fps_smoothed:.1f}", (10, 54),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
 
