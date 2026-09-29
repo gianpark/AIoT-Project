@@ -117,9 +117,9 @@ function noteTag(slide, x, y, text, kind) {
   const s = newSlide();
   pageTitle(s, "목차", "Contents");
   const items = [
-    "01   개발 환경 정비 · 데이터 수집 프로토콜", "02   다음 주(5주차) 계획",
-    "03   4주차 게이트 측정 결과", "04   발견한 설계 리스크: depth 근접 사각지대",
-    "05   선행 논문 데이터로 파이프라인 사전 검증",
+    "01   개발 환경 정비 · 데이터 수집 프로토콜", "02   4주차 게이트 측정 결과",
+    "03   발견한 설계 리스크: depth 근접 사각지대", "04   선행 논문 데이터로 파이프라인 사전 검증",
+    "05   다음 주(5주차) 계획",
   ];
   const colW = 5.55, gapX = 0.5, startX = 0.7, startY = 2.1, rowH = 0.9;
   const perCol = Math.ceil(items.length / 2);
@@ -188,30 +188,7 @@ function noteTag(slide, x, y, text, kind) {
 }
 
 // =====================================================================================
-// 4. NEXT WEEK PLAN
-// =====================================================================================
-{
-  const s = newSlide();
-  pageTitle(s, "다음 주(5주차) 계획", "Next Week");
-  const plan = [
-    { n: "1", t: "RealSense depth 프리셋·필터 튜닝, 줄자 확보해 거리 정확도 정밀 재검증" },
-    { n: "2", t: "근접 사각지대 보완 — 얼굴·어깨 면적비 기반 근접 판정 실제 구현" },
-    { n: "3", t: "판정 로직과 스테레오+포즈 파이프라인 1차 통합" },
-    { n: "4", t: "데이터 수집 프로토콜에 따라 실제 촬영 착수" },
-    { n: "5", t: "논문 Introduction · Related Work 초안 (이번 주 이월분)" },
-  ];
-  plan.forEach((item, i) => {
-    const y = 1.9 + i * 0.92;
-    s.addShape(pres.ShapeType.roundRect, { x: 0.7, y, w: 11.93, h: 0.8, rectRadius: 0.1, fill: { color: CARD }, line: { type: "none" } });
-    s.addShape(pres.ShapeType.roundRect, { x: 0.9, y: y + 0.2, w: 0.5, h: 0.4, rectRadius: 0.08, fill: { color: "E9FBF7" }, line: { type: "none" } });
-    s.addText(item.n, { x: 0.9, y: y + 0.2, w: 0.5, h: 0.4, align: "center", valign: "middle", fontFace: FONT_BODY, fontSize: 13, bold: true, color: TEAL_DARK, isTextBox: true, margin: 0 });
-    s.addText(item.t, { x: 1.55, y, w: 10.8, h: 0.8, valign: "middle", fontFace: FONT_BODY, fontSize: 13.5, color: TXT_DARK, isTextBox: true, margin: 0, lineSpacingMultiple: 1.15 });
-  });
-  pageNum(s, 4);
-}
-
-// =====================================================================================
-// 5. GATE MEASUREMENT RESULTS
+// 4. GATE MEASUREMENT RESULTS
 // =====================================================================================
 {
   const s = newSlide();
@@ -245,11 +222,11 @@ function noteTag(slide, x, y, text, kind) {
   s.addText("카메라 캡처 단독 수치 — MoveNet 추론 통합 후 재측정 필요. 거리 정밀 오차값은 줄자 미확보로 다음 주로 이월", {
     x: 9.1, y: 5.17, w: 3.08, h: 0.82, fontFace: FONT_BODY, fontSize: 10, color: TXT_LIGHT, isTextBox: true, margin: 0, lineSpacingMultiple: 1.2,
   });
-  pageNum(s, 5);
+  pageNum(s, 4);
 }
 
 // =====================================================================================
-// 6. RISK: DEPTH NEAR-RANGE BLIND SPOT
+// 5. RISK: DEPTH NEAR-RANGE BLIND SPOT
 // =====================================================================================
 {
   const s = newSlide();
@@ -284,11 +261,11 @@ function noteTag(slide, x, y, text, kind) {
     s.addText(c.body, { x: x + 0.3, y: y2 + 1.15, w: cw - 0.6, h: h2 - 1.35, fontFace: FONT_BODY, fontSize: 12, color: "3C4A50", isTextBox: true, margin: 0, lineSpacingMultiple: 1.25 });
   });
   noteTag(s, 0.7, y2 + h2 + 0.15, "구현 전 — 5주차 필터 튜닝과 함께 진행 예정", "warn");
-  pageNum(s, 6);
+  pageNum(s, 5);
 }
 
 // =====================================================================================
-// 7. PRIOR-WORK DATA PIPELINE VALIDATION
+// 6. PRIOR-WORK DATA PIPELINE VALIDATION
 // =====================================================================================
 {
   const s = newSlide();
@@ -328,11 +305,11 @@ function noteTag(slide, x, y, text, kind) {
     x: 7.08, y: 5.05, w: 5.25, h: 0.4, fontFace: FONT_BODY, fontSize: 11, italic: true, color: "3C4A50", isTextBox: true, margin: 0,
   });
   noteTag(s, 7.08, 5.55, "합성 데이터 — 정확도 수치 의미 없음", "warn");
-  pageNum(s, 7);
+  pageNum(s, 6);
 }
 
 // =====================================================================================
-// 8. CONCLUSION
+// 7. CONCLUSION
 // =====================================================================================
 {
   const s = newSlide();
@@ -352,36 +329,36 @@ function noteTag(slide, x, y, text, kind) {
     s.addText(item.code, { x: 0.9, y: y + 0.2, w: 0.5, h: 0.4, align: "center", valign: "middle", fontFace: FONT_BODY, fontSize: item.code === "남음" ? 9 : 15, bold: true, color: isLast ? TEAL : TEAL_DARK, isTextBox: true, margin: 0 });
     s.addText(item.t, { x: 1.55, y, w: 10.8, h: 0.8, valign: "middle", fontFace: FONT_BODY, fontSize: 13, color: isLast ? TXT_LIGHT : TXT_DARK, isTextBox: true, margin: 0, lineSpacingMultiple: 1.15 });
   });
-  pageNum(s, 8);
+  pageNum(s, 7);
 }
 
 // =====================================================================================
-// 9. REFERENCES / SOURCES
+// 8. NEXT WEEK PLAN
 // =====================================================================================
 {
   const s = newSlide();
-  pageTitle(s, "참고 자료", "Sources");
-  const refs = [
-    { code: "01", text: "project.md — 전체 프로젝트 계획 (이번 주 업데이트 반영 최신본)" },
-    { code: "02", text: "data_collection_protocol.md — 자세 5종 정의·촬영/라벨링 절차" },
-    { code: "03", text: "src/capture/realsense_capture.py — RealSense 캡처·게이트 측정 코드" },
-    { code: "04", text: "src/logic/rf_baseline.py, tests/test_rf_baseline.py — RF 기준모델 스켈레톤" },
-    { code: "05", text: "experiments/wrf_paper_replication.py — WRF 논문 데이터 파이프라인 검증" },
-    { code: "06", text: "weekly_report_week4.md — 4주차 상세 진행보고서" },
+  pageTitle(s, "다음 주(5주차) 계획", "Next Week");
+  const plan = [
+    { n: "1", t: "RealSense depth 프리셋·필터 튜닝, 줄자 확보해 거리 정확도 정밀 재검증" },
+    { n: "2", t: "근접 사각지대 보완 — 얼굴·어깨 면적비 기반 근접 판정 실제 구현" },
+    { n: "3", t: "판정 로직과 스테레오+포즈 파이프라인 1차 통합" },
+    { n: "4", t: "데이터 수집 프로토콜에 따라 실제 촬영 착수" },
+    { n: "5", t: "논문 Introduction · Related Work 초안 (이번 주 이월분)" },
   ];
-  refs.forEach((r, i) => {
-    const y = 1.75 + i * 0.78;
-    s.addShape(pres.ShapeType.roundRect, { x: 0.7, y, w: 11.93, h: 0.65, rectRadius: 0.08, fill: { color: CARD }, line: { type: "none" } });
-    s.addShape(pres.ShapeType.roundRect, { x: 0.85, y: y + 0.13, w: 0.42, h: 0.4, rectRadius: 0.07, fill: { color: "E9FBF7" }, line: { type: "none" } });
-    s.addText(r.code, { x: 0.85, y: y + 0.13, w: 0.42, h: 0.4, align: "center", valign: "middle", fontFace: FONT_BODY, fontSize: 11.5, bold: true, color: TEAL_DARK, isTextBox: true, margin: 0 });
-    s.addText(r.text, { x: 1.45, y, w: 10.9, h: 0.65, valign: "middle", fontFace: FONT_BODY, fontSize: 12, color: TXT_DARK, isTextBox: true, margin: 0 });
+  plan.forEach((item, i) => {
+    const y = 1.9 + i * 0.92;
+    s.addShape(pres.ShapeType.roundRect, { x: 0.7, y, w: 11.93, h: 0.8, rectRadius: 0.1, fill: { color: CARD }, line: { type: "none" } });
+    s.addShape(pres.ShapeType.roundRect, { x: 0.9, y: y + 0.2, w: 0.5, h: 0.4, rectRadius: 0.08, fill: { color: "E9FBF7" }, line: { type: "none" } });
+    s.addText(item.n, { x: 0.9, y: y + 0.2, w: 0.5, h: 0.4, align: "center", valign: "middle", fontFace: FONT_BODY, fontSize: 13, bold: true, color: TEAL_DARK, isTextBox: true, margin: 0 });
+    s.addText(item.t, { x: 1.55, y, w: 10.8, h: 0.8, valign: "middle", fontFace: FONT_BODY, fontSize: 13.5, color: TXT_DARK, isTextBox: true, margin: 0, lineSpacingMultiple: 1.15 });
   });
   s.addText("질문 받겠습니다", {
-    x: 0.7, y: 1.75 + refs.length * 0.78 + 0.25, w: 11.93, h: 0.45, align: "center",
+    x: 0.7, y: 6.65, w: 11.93, h: 0.45, align: "center",
     fontFace: FONT_BODY, fontSize: 13.5, italic: true, color: TXT_MUTED, isTextBox: true, margin: 0,
   });
-  pageNum(s, 9);
+  pageNum(s, 8);
 }
+
 
 pres.writeFile({ fileName: "barunjase_week4.pptx" }).then(() => {
   console.log("done");
