@@ -12,13 +12,13 @@
 | # | 계획 | 결과 |
 |---|---|---|
 | 1 | MoveNet 17키포인트 추출 코드 | ✅ 완료 (이미 보유 코드 정리, `src/pose/`) |
-| 2 | RF 기준모델 학습 스켈레톤 | ⏸ 미착수 — 대신 WRF 논문 공개 데이터로 RF/WRF 학습 파이프라인 자체가 동작하는지 사전 검증만 진행함(2-7 참고). 우리 프로젝트 자체 특징 스키마로 `src/logic/`에 스켈레톤 코드를 짜는 작업은 아직 안 함 |
+| 2 | RF 기준모델 학습 스켈레톤 | ✅ 완료 (`src/logic/rf_baseline.py`, 합성 데이터 기준 — 2-8 참고) |
 | 3 | 데이터 수집 프로토콜 문서화 | ✅ 완료 (`data_collection_protocol.md`) |
 | 4 | 캘리브레이션 사전 준비 | ⚠️ 방향 자체가 바뀜 — 카메라가 RealSense D455로 확인되면서 체스보드 캘리브레이션이 불필요해짐 (2장 참고) |
 | 5, 6 | 논문 Introduction/Related Work 초안 | ⏸ 미착수 — 카메라 이슈 대응에 시간을 씀, 5주차로 이월 |
 | 7~9 | 캘리브레이션·디스패리티 튜닝·4주차 게이트 | ✅ 게이트 완료 (디스패리티 튜닝은 RealSense가 출고 캘리브레이션 완료 상태라 해당 없음) |
 
-**요약**: 1, 3, 7~9번은 완료. 2번(RF 기준모델 학습 스켈레톤)과 5, 6번(논문 초안)은 미착수 — 대신 예정에 없던 카메라 기종 확인·수정, USB 인식 트러블슈팅, RF/WRF 파이프라인 동작 사전 검증(2번과는 별개 작업)을 추가로 진행했다.
+**요약**: 5, 6번(논문 초안)을 제외한 계획 항목은 모두 완료. 예정에 없던 카메라 기종 확인·수정, USB 인식 트러블슈팅, WRF 논문 데이터 기반 파이프라인 사전 검증까지 추가로 진행했다.
 
 ---
 
@@ -79,6 +79,15 @@ D455 depth는 실측 기준 약 40cm 이하(스펙상 0.6m)에서 무효값을 �
 
 상세: `experiments/wrf_paper_replication.py`, `experiments/wrf_paper_replication_results.md`
 
+### 2-8. RF 기준모델 학습 스켈레톤 (우리 프로젝트 특징 스키마 기준)
+
+2-7과는 별개로, 우리 프로젝트 자체 특징(`posture_features.py`가 뽑는 `neck_tilt_deg`, `torso_lean_deg`, `shoulder_slope_deg`, `nose_to_hip_dist`)을 쓰는 학습 스켈레톤을 `src/logic/rf_baseline.py`에 작성했다.
+
+- 클래스 5종(`normal`, `slouch_forward`, `slouch_back`, `tilt_left`, `tilt_right`)별로 합성 keypoint를 만들고, 좌우반전·jitter 증강(`data_collection_protocol.md` 7절 계획)을 적용해 데이터셋을 구성
+- train/test split → RandomForest 학습·평가까지 파이프라인이 에러 없이 동작함을 확인 (테스트셋 정확도 0.66이 출력되지만, 클래스별 좌표를 임의로 다르게 만든 합성 데이터라 **이 수치는 의미 없음** — 코드 내 주석·실행 시 출력 문구로도 명시해둠)
+- `tests/test_rf_baseline.py`에 증강 함수 테스트 5종 추가, 기존 것과 합쳐 전체 테스트 10개 통과 확인
+- 5주차에 실제 데이터가 모이면 데이터 로딩 부분만 실제 데이터로 교체해서 재사용할 계획
+
 ---
 
 ## 3. 미해결/보류 항목
@@ -88,7 +97,6 @@ D455 depth는 실측 기준 약 40cm 이하(스펙상 0.6m)에서 무효값을 �
 - **거리 정확도 정밀 오차값** — 줄자로 재측정 필요
 - **근접 사각지대 보완(얼굴 면적비 판정)** — 구현 전, 5주차 예정
 - **논문 Introduction/Related Work 초안** — 착수 못함, 5주차로 이월
-- **RF 기준모델 학습 스켈레톤(우리 프로젝트 특징 스키마 기준)** — 아직 착수 못함(WRF 논문 데이터 검증은 별개 작업)
 
 ---
 
@@ -99,7 +107,7 @@ D455 depth는 실측 기준 약 40cm 이하(스펙상 0.6m)에서 무효값을 �
 3. 판정 로직과 스테레오+포즈 파이프라인 1차 통합
 4. 자체 데이터 수집 착수(자세 5종 촬영, `data_collection_protocol.md` 기준)
 5. 논문 Introduction·Related Work 초안 (이월분)
-6. RF 기준모델 학습 스켈레톤 작성 (이월분, 우리 특징 스키마 기준)
+6. RF 기준모델 학습 — `rf_baseline.py`의 데이터 로딩 부분을 실제 수집 데이터로 교체
 
 ---
 
@@ -108,4 +116,5 @@ D455 depth는 실측 기준 약 40cm 이하(스펙상 0.6m)에서 무효값을 �
 - `project.md` — 전체 계획 (이번 주 업데이트 반영 최신본)
 - `experiments/wrf_paper_replication.py`, `experiments/wrf_paper_replication_results.md`
 - `src/capture/realsense_capture.py`
+- `src/logic/rf_baseline.py`, `tests/test_rf_baseline.py`
 - `data_collection_protocol.md`
