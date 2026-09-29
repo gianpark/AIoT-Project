@@ -29,6 +29,15 @@ pip install -r requirements.txt
 - `pip install -r requirements.txt`로 `pyrealsense2`까지 같이 설치됨 (Windows/Linux/Intel Mac은 pip 설치로 충분, Apple Silicon Mac은 별도 빌드가 필요할 수 있음 — 안 되면 팀 채널에 공유)
 - RealSense는 출고 시 스테레오 캘리브레이션이 끝나 있어서, oCamS 때 계획했던 체스보드 수동 캘리브레이션은 필요 없다. 대신 카메라 연결 후 depth 스트림이 정상적으로 나오는지, 줄자로 잰 실제 거리와 SDK가 보고하는 값이 맞는지 검증하는 절차로 대체한다.
 - 연결 확인: `realsense-viewer`(SDK 설치 시 같이 깔리는 GUI 도구)로 먼저 depth/RGB 스트림이 뜨는지 확인하는 걸 추천 — 파이썬 코드 짜기 전에 하드웨어 자체가 인식되는지부터 눈으로 보는 게 디버깅이 빠름
+- 캡처 코드는 `src/capture/realsense_capture.py`에 있음:
+
+```bash
+# 화면 중앙 십자선까지의 거리 + fps 실시간 표시 (줄자로 거리 정확도 확인, q로 종료)
+python -m src.capture.realsense_capture view
+
+# 30초 동안 fps·프레임타임 스파이크 자동 측정 (4주차 게이트)
+python -m src.capture.realsense_capture gate --seconds 30
+```
 
 ## MoveNet 모델 파일
 
