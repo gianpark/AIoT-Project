@@ -28,6 +28,14 @@ tensorflow
 # xgboost               # 7주차 공정비교
 # lightgbm              # 7주차 공정비교
 
+# --- 실험용 (WRF 논문 데이터로 RF/WRF 파이프라인 사전 검증, experiments/ 실행할 때만) ---
+# 4주차에 카메라 문제로 대기하는 동안 RF 학습 파이프라인을 WRF 논문 공개 데이터로
+# 미리 검증해봤다 (experiments/wrf_paper_replication.py, 결과는 같은 폴더 .md 참고).
+# 6주차에 실제 분류기 학습을 시작하면 어차피 필요해지는 것들이라 미리 적어둠.
+scikit-learn==1.8.0
+pandas
+openpyxl
+
 # --- 8~9주차 이후(TTS 알림) 필요, 지금은 안 깔아도 됨 ---
 # pyttsx3
 

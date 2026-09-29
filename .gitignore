@@ -11,6 +11,9 @@ models/*.tflite
 # 수집한 원본 이미지/영상은 git에 안 올린다 (개인정보 + 용량)
 data/raw/
 
+# 외부 공개 데이터셋(WRF 논문 등)은 각자 스크립트 안내대로 다시 받는다 (git에 안 올림)
+data/external_wrf/
+
 # 로컬 로그/캐시
 *.log
 *.csv
