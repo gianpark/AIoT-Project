@@ -155,13 +155,18 @@ class MoveNetExtractor:
         ]
 
 
-def draw_skeleton(frame: np.ndarray, keypoints: list[Keypoint], threshold: float) -> np.ndarray:
+def draw_skeleton(frame: np.ndarray, keypoints: list[Keypoint], threshold: float, show_labels: bool = False) -> np.ndarray:
     h, w = frame.shape[:2]
     for kp in keypoints:
         if kp.score < threshold:
             continue
         cx, cy = int(kp.x * w), int(kp.y * h)
         cv2.circle(frame, (cx, cy), 4, (0, 255, 170), -1)
+        if show_labels:
+            # 어떤 keypoint가 실제로 어디서 잡히는지 눈으로 바로 확인하기 위한 디버그 라벨
+            # (책상 구도에서 keypoint 신뢰도 검증용 — 스크립트 상단 docstring 참고)
+            cv2.putText(frame, kp.name, (cx + 6, cy - 6), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.4, (0, 255, 170), 1, cv2.LINE_AA)
 
     for i, j in SKELETON_EDGES:
         a, b = keypoints[i], keypoints[j]
@@ -222,6 +227,7 @@ def main():
                          help="일반 웹캠 대신 RealSense D455의 color 스트림을 사용 (pyrealsense2 필요)")
     parser.add_argument("--fps", type=int, default=30, help="--realsense 사용 시 요청 fps")
     parser.add_argument("--threshold", type=float, default=0.3, help="시각화용 confidence 임계값")
+    parser.add_argument("--labels", action="store_true", help="각 keypoint 점 옆에 이름을 표시 (어떤 점이 어떤 keypoint인지 눈으로 확인용)")
     parser.add_argument("--log", type=str, default=None, help="keypoint별 confidence를 저장할 CSV 경로")
     args = parser.parse_args()
 
@@ -246,7 +252,7 @@ def main():
                 continue
 
             keypoints = extractor.infer(frame)
-            frame = draw_skeleton(frame, keypoints, args.threshold)
+            frame = draw_skeleton(frame, keypoints, args.threshold, show_labels=args.labels)
 
             features = compute_posture_features(keypoints)
             if features:
