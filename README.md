@@ -54,9 +54,20 @@ import하기 때문에 `src/pose/movenet_keypoints.py`를 직접 실행하면 �
 python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflite
 ```
 
+## RF 기준모델 스켈레톤 (4주차, 합성 데이터)
+
+`src/logic/rf_baseline.py` — 실제 자세 데이터가 모이기 전(5주차 수집 예정)까지, 합성
+keypoint 데이터로 "증강(좌우반전+jitter) → 특징추출 → RF 학습 → 평가" 파이프라인이
+동작하는지만 확인하는 스켈레톤이다. **여기 나오는 정확도는 합성 데이터 기준이라 의미
+없음** — 6주차에 실제 데이터로 데이터 로딩 부분만 교체해서 재사용할 것.
+
+```bash
+python -m src.logic.rf_baseline
+```
+
 ## 테스트
 
-카메라·모델 없이 검증 가능한 로직(정규화, 각도 계산 등)은 `tests/`에 있다:
+카메라·모델 없이 검증 가능한 로직(정규화, 각도 계산, RF 스켈레톤 등)은 `tests/`에 있다:
 
 ```bash
 python -m pytest tests/
@@ -69,7 +80,7 @@ src/
   capture/   # 카메라 입력 (pyrealsense2), depth 정확도 검증 (센싱 담당)
   pose/      # MoveNet 키포인트 추출 (로직 담당)
   features/  # 정규화 + 각도 특징 계산
-  logic/     # 판정 상태머신
+  logic/     # 판정 상태머신, RF 기준모델 스켈레톤(rf_baseline.py, 4주차 - 합성 데이터)
 models/      # .tflite 모델 파일 (git 미포함, 위에서 직접 다운로드)
 data/        # 수집한 자세 데이터 (git 미포함)
 tests/

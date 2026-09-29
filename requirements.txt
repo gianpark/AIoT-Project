@@ -23,16 +23,16 @@ tensorflow
 # tflite-runtime이 본인 Python 버전에서 설치된다면 이 줄로 바꿔써도 됨(더 가벼움):
 # tflite-runtime==2.14.0
 
-# --- 아래는 6주차 이후(분류기 학습 단계)부터 필요, 지금은 안 깔아도 됨 ---
-# scikit-learn==1.8.0   # RF 기준모델
+# --- 아래는 7주차 이후(공정 비교 실험)부터 필요, 지금은 안 깔아도 됨 ---
 # xgboost               # 7주차 공정비교
 # lightgbm              # 7주차 공정비교
 
-# --- 실험용 (WRF 논문 데이터로 RF/WRF 파이프라인 사전 검증, experiments/ 실행할 때만) ---
-# 4주차에 카메라 문제로 대기하는 동안 RF 학습 파이프라인을 WRF 논문 공개 데이터로
-# 미리 검증해봤다 (experiments/wrf_paper_replication.py, 결과는 같은 폴더 .md 참고).
-# 6주차에 실제 분류기 학습을 시작하면 어차피 필요해지는 것들이라 미리 적어둠.
+# --- scikit-learn: 4주차부터 이미 사용 중 ---
+# src/logic/rf_baseline.py(합성 데이터 기준 RF 스켈레톤, tests/test_rf_baseline.py 포함)와
+# experiments/wrf_paper_replication.py(WRF 논문 데이터 파이프라인 검증)가 둘 다 씀.
+# 6주차에 실제 데이터로 RF 기준모델을 학습할 때도 그대로 재사용.
 scikit-learn==1.8.0
+# 아래 둘은 WRF 논문 데이터(Dataset.xlsx) 읽을 때만 필요 (experiments/ 전용)
 pandas
 openpyxl
 
