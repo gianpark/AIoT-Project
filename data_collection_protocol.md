@@ -41,7 +41,7 @@
 
 ## 4. 촬영 절차
 
-1. 카메라 연결 후 `python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflite`로 스켈레톤이 잘 뜨는지 먼저 확인 (프레이밍이 어긋나면 재조정)
+1. RealSense 연결 후 `python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflite --realsense`로 스켈레톤이 잘 뜨는지 먼저 확인 (프레이밍이 어긋나면 재조정) — `--realsense`를 빼면 노트북 기본 웹캠으로 잡히니 반드시 붙일 것, 최종 제품과 화각·렌즈 특성을 맞추기 위해 실제 촬영은 RealSense로 진행한다
 2. 참가자에게 위 표의 "촬영 시 지시 문구"를 그대로 읽어주고, 각 자세를 자연스럽게 잡을 시간을 준다
 3. 클래스당 연속 10~15장을 짧은 간격으로 촬영 (같은 자세 안에서도 미세한 각도 차이가 생기도록 자연스럽게)
 4. 파일명 규칙: `{참가자ID}_{클래스}_{일련번호}.jpg` (예: `p01_normal_003.jpg`, `p01_slouch_forward_003.jpg`)

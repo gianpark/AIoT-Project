@@ -4,8 +4,10 @@
 
 용도
 ----
-1) 웹캠(또는 추후 스테레오 카메라의 좌안 프레임)에서 MoveNet Lightning으로
-   17개 keypoint를 실시간 추출하고 화면에 스켈레톤을 그려 보여준다.
+1) 웹캠 또는 RealSense D455의 color 스트림(`--realsense`)에서 MoveNet Lightning으로
+   17개 keypoint를 실시간 추출하고 화면에 스켈레톤을 그려 보여준다. 실제 자세 데이터
+   수집은 최종 제품과 화각·렌즈 특성을 맞추기 위해 `--realsense`로 진행한다(depth는
+   아직 결합하지 않음 — 5주차 "판정 로직 1차 통합" 참고).
 2) 각 keypoint의 confidence를 CSV로 기록한다 — "상반신만 보이는 책상 구도에서
    어떤 keypoint를 신뢰할 수 있는가"를 실측으로 검증하기 위한 기초 데이터다.
 
@@ -34,6 +36,9 @@ TensorFlow Hub의 모델 배포처가 Kaggle Models로 통합되어, 지금은 �
 --------
     # 웹캠으로 실시간 확인 (q로 종료)
     python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflite
+
+    # RealSense D455의 color 스트림으로 실시간 확인 (실제 데이터 수집은 이 방식으로)
+    python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflite --realsense
 
     # confidence 로그를 CSV로 저장 (카메라 프레이밍/keypoint 신뢰도 검증용)
     python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflite \
@@ -169,10 +174,53 @@ def draw_skeleton(frame: np.ndarray, keypoints: list[Keypoint], threshold: float
     return frame
 
 
+class _WebcamSource:
+    """일반 웹캠(cv2.VideoCapture)에서 BGR 프레임을 읽는 소스."""
+
+    def __init__(self, camera_index: int):
+        self._cap = cv2.VideoCapture(camera_index)
+        if not self._cap.isOpened():
+            raise SystemExit(f"카메라(index={camera_index})를 열 수 없습니다.")
+
+    def read(self):
+        ok, frame = self._cap.read()
+        return frame if ok else None
+
+    def release(self) -> None:
+        self._cap.release()
+
+
+class _RealSenseSource:
+    """RealSense D455의 color 스트림에서 BGR 프레임을 읽는 소스.
+
+    depth는 아직 이 스크립트에서 쓰지 않는다 — 판정 로직에 depth까지 결합하는 건
+    project.md 6장 "5주차: 판정 로직과 스테레오+포즈 파이프라인 1차 통합"에서 할 일이고,
+    지금은 "실제 데이터 수집을 RealSense의 RGB로 하기 위해 카메라 소스만 맞추는" 단계다.
+    """
+
+    def __init__(self, fps: int):
+        from src.capture.realsense_capture import RealSenseCamera  # 여기서만 필요해 지연 import
+
+        self._cam = RealSenseCamera(fps=fps).start()
+
+    def read(self):
+        result = self._cam.read()
+        if result is None:
+            return None
+        color_image, _depth_frame, _timestamp_ms = result
+        return color_image
+
+    def release(self) -> None:
+        self._cam.stop()
+
+
 def main():
     parser = argparse.ArgumentParser(description="MoveNet 17키포인트 실시간 추출/기록")
     parser.add_argument("--model", required=True, help="MoveNet Lightning .tflite 모델 경로")
-    parser.add_argument("--camera", type=int, default=0, help="cv2.VideoCapture 인덱스 (기본 0)")
+    parser.add_argument("--camera", type=int, default=0, help="cv2.VideoCapture 인덱스 (기본 0, --realsense와 함께 쓰지 않음)")
+    parser.add_argument("--realsense", action="store_true",
+                         help="일반 웹캠 대신 RealSense D455의 color 스트림을 사용 (pyrealsense2 필요)")
+    parser.add_argument("--fps", type=int, default=30, help="--realsense 사용 시 요청 fps")
     parser.add_argument("--threshold", type=float, default=0.3, help="시각화용 confidence 임계값")
     parser.add_argument("--log", type=str, default=None, help="keypoint별 confidence를 저장할 CSV 경로")
     args = parser.parse_args()
@@ -181,9 +229,7 @@ def main():
         raise SystemExit(f"모델 파일을 찾을 수 없습니다: {args.model} (스크립트 상단 docstring 참고)")
 
     extractor = MoveNetExtractor(args.model)
-    cap = cv2.VideoCapture(args.camera)
-    if not cap.isOpened():
-        raise SystemExit(f"카메라(index={args.camera})를 열 수 없습니다.")
+    source = _RealSenseSource(args.fps) if args.realsense else _WebcamSource(args.camera)
 
     log_file = None
     log_writer = None
@@ -192,13 +238,12 @@ def main():
         log_writer = csv.writer(log_file)
         log_writer.writerow(["timestamp"] + [f"{name}_score" for name in KEYPOINT_NAMES])
 
-    print("실행 중... 'q'를 누르면 종료합니다.")
+    print(f"실행 중 (소스: {'RealSense D455' if args.realsense else f'웹캠 index={args.camera}'})... 'q'를 누르면 종료합니다.")
     try:
         while True:
-            ok, frame = cap.read()
-            if not ok:
-                print("프레임을 읽지 못했습니다.")
-                break
+            frame = source.read()
+            if frame is None:
+                continue
 
             keypoints = extractor.infer(frame)
             frame = draw_skeleton(frame, keypoints, args.threshold)
@@ -218,7 +263,7 @@ def main():
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
     finally:
-        cap.release()
+        source.release()
         cv2.destroyAllWindows()
         if log_file:
             log_file.close()

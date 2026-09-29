@@ -44,6 +44,7 @@ python -m src.capture.realsense_capture gate --seconds 30
 용량 때문에 git에 올리지 않는다. 아래에서 각자 받아서 `models/` 폴더에 넣을 것:
 
 - https://www.kaggle.com/models/google/movenet/tfLite/singlepose-lightning-tflite-int8
+- Kaggle에서 받으면 `.tflite` 단일 파일이 아니라 `.tar.gz`로 받아진다(4주차 실측 확인). 압축을 풀면 `4.tflite` 같은 이름이 나오는데, 이걸 `models/movenet_lightning_int8.tflite`로 이름을 바꿔서 넣으면 된다.
 
 ## 실행
 
@@ -51,7 +52,11 @@ python -m src.capture.realsense_capture gate --seconds 30
 import하기 때문에 `src/pose/movenet_keypoints.py`를 직접 실행하면 안 됨):
 
 ```bash
+# 웹캠으로 실시간 확인 (q로 종료)
 python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflite
+
+# RealSense D455의 color 스트림으로 실행 (실제 자세 데이터 수집은 이 방식 — 최종 제품과 화각을 맞추기 위함)
+python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflite --realsense
 ```
 
 ## RF 기준모델 스켈레톤 (4주차, 합성 데이터)
