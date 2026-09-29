@@ -3,9 +3,14 @@
 # (팀원 노트북이 Raspberry Pi가 아니라 일반 PC이므로 tflite-runtime이 안 깔리면
 #  아래 tensorflow로 대체해도 됨 — 코드는 둘 다 자동으로 시도하게 되어 있음)
 
-# 카메라 입력 + 영상 처리 + 스테레오 캘리브레이션(추후)
+# 카메라 입력 + 영상 처리
 opencv-python==4.13.0.92
 numpy==2.4.4
+
+# 스테레오 카메라 (Intel RealSense D455) — 4주차부터 필요, depth 프레임 획득용
+# (계획 단계엔 oCamS-1CGN-U 기준 위드로봇 SDK였으나 실제 수령 카메라가 RealSense로
+#  바뀌어서 SDK도 교체됨. project.md 2장 결정 로그 참고)
+pyrealsense2
 
 # MoveNet 포즈 추정 (TFLite 인터프리터만 필요, 학습 프레임워크 전체는 불필요)
 tflite-runtime==2.14.0
