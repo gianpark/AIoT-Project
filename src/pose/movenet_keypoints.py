@@ -184,6 +184,47 @@ class MoveNetExtractor:
         ]
 
 
+# 우리 특징 계산에 실제로 쓰이는 keypoint만 스무딩 대상으로 삼는다(posture_features.py의
+# nose/shoulders/hips) — 팔·눈·무릎 등은 애초에 특징에 안 쓰여서 굳이 붙잡아둘 필요가 없다.
+SMOOTHED_KEYPOINT_IDX = [0, 5, 6, 11, 12]  # nose, left_shoulder, right_shoulder, left_hip, right_hip
+
+
+class KeypointOcclusionSmoother:
+    """책상 구도 + 위에서 내려다보는 카메라 각도에서는, 머리를 화면 쪽으로 내미는 순간
+    머리가 카메라 시야상 어깨·엉덩이보다 앞쪽에 오면서 그 지점을 가려 confidence가
+    순간적으로 뚝 떨어지는 경우가 있다(5주차 실측으로 발견). 이건 대부분 아주 짧은
+    자기 가림(self-occlusion)이라, confidence가 떨어진 프레임에서는 "마지막으로 확실히
+    잡혔던 위치"를 잠깐(hold_frames 프레임) 유지해서 화면이 튀거나 특징값이 순간적으로
+    엉뚱해지는 걸 막는다. 계속(hold_frames 넘게) 가려지면 결국 원본 저신뢰 값을 그대로
+    내보낸다 — 없는 정보를 영원히 지어내지 않기 위함. score는 원본 값을 그대로 두므로
+    (위치만 보간), confidence 기반 경고·로그는 계속 정상적으로 동작한다.
+    """
+
+    def __init__(self, hold_frames: int = 10, confidence_threshold: float = 0.3):
+        self.hold_frames = hold_frames
+        self.confidence_threshold = confidence_threshold
+        self._last_good: dict[int, Keypoint] = {}
+        self._held_for: dict[int, int] = {}
+
+    def smooth(self, keypoints: list[Keypoint]) -> list[Keypoint]:
+        result = list(keypoints)
+        for idx in SMOOTHED_KEYPOINT_IDX:
+            kp = keypoints[idx]
+            if kp.score >= self.confidence_threshold:
+                self._last_good[idx] = kp
+                self._held_for[idx] = 0
+                continue
+
+            held_so_far = self._held_for.get(idx, 0)
+            if idx in self._last_good and held_so_far < self.hold_frames:
+                anchor = self._last_good[idx]
+                self._held_for[idx] = held_so_far + 1
+                result[idx] = Keypoint(name=kp.name, x=anchor.x, y=anchor.y, score=kp.score)
+            # else: 붙잡아둘 게 없거나 hold_frames를 넘겼으면 원본(저신뢰) 값 그대로 둔다
+
+        return result
+
+
 # OpenCV 기본 폰트(Hershey)는 한글을 그리지 못한다(깨지거나 아예 안 보임) — 촬영 중
 # "지금 무슨 자세를 취해야 하는지" 화면에서 바로 읽을 수 있게, Pillow + 시스템 한글
 # 폰트(Windows 기본 맑은 고딕)로 따로 그린다. Pillow나 한글 폰트가 없으면 조용히
@@ -383,6 +424,10 @@ def main():
     # 있어서(자연스러운 프레임 간 잡음), 화면이 안정적으로 읽히게 스무딩한다.
     hip_score_history: deque[float] = deque(maxlen=8)
 
+    # 머리를 앞으로 내밀 때 머리가 어깨/엉덩이를 순간적으로 가리는 자기 가림(self-occlusion)
+    # 대응 — 짧은 순간의 가림은 마지막으로 확실했던 위치를 유지한다.
+    occlusion_smoother = KeypointOcclusionSmoother(hold_frames=10, confidence_threshold=args.hip_warn_threshold)
+
     extractor = MoveNetExtractor(args.model)
     source = _RealSenseSource(args.fps) if args.realsense else _WebcamSource(args.camera)
 
@@ -396,6 +441,28 @@ def main():
             header += DEPTH_FEATURE_KEYS
         log_writer.writerow(header)
 
+    # 저장된 사진 각각에 대응하는 depth 특징을 같이 남긴다 — RGB 사진(raw_frame)과 달리
+    # depth 프레임 자체는 저장하지 않으므로, 지금 안 남기면 이 정보는 영구히 사라진다.
+    # data/raw/ 는 통째로 .gitignore 돼 있어서(원본 이미지 git 제외 규칙), 이 로그는
+    # 한 단계 위(예: data/)에 별도로 둬서 labels.csv처럼 git에 올라가게 한다.
+    capture_feature_log_path = None
+    capture_feature_log_file = None
+    capture_feature_log_writer = None
+    if capture_mode and args.realsense:
+        capture_feature_log_path = Path(args.save_dir).parent / "capture_features_log.csv"
+        is_new = not capture_feature_log_path.exists()
+        capture_feature_log_file = open(capture_feature_log_path, "a", newline="", encoding="utf-8")
+        capture_feature_log_writer = csv.writer(capture_feature_log_file)
+        if is_new:
+            capture_feature_log_writer.writerow(
+                ["filename", "participant_id", "label", "timestamp",
+                 "nose_score", "left_shoulder_score", "right_shoulder_score",
+                 "left_hip_score", "right_hip_score"] + DEPTH_FEATURE_KEYS
+            )
+        print(f"촬영 사진별 depth 특징도 같이 기록합니다: {capture_feature_log_path}")
+    elif capture_mode and not args.realsense:
+        print("(참고: --realsense 없이는 depth 특징을 기록할 수 없습니다 — 사진만 저장됩니다.)")
+
     print(f"실행 중 (소스: {'RealSense D455' if args.realsense else f'웹캠 index={args.camera}'})... 'q'를 누르면 종료합니다.")
     try:
         while True:
@@ -404,7 +471,11 @@ def main():
                 continue
 
             raw_frame = frame.copy()  # 저장용 원본 (스켈레톤 안 그려진 상태)
-            keypoints = extractor.infer(frame)
+            keypoints_raw = extractor.infer(frame)
+            # 화면 표시·특징 계산에는 자기 가림 보정을 적용한 값을 쓰고, confidence 로그에는
+            # 원본 점수를 그대로 남긴다(보정은 위치만 바꾸고 score는 원본을 유지하긴 하지만,
+            # 로그는 항상 extractor가 준 원본 리스트를 기준으로 쓴다).
+            keypoints = occlusion_smoother.smooth(keypoints_raw)
             frame = draw_skeleton(frame, keypoints, args.threshold, show_labels=args.labels)
 
             if capture_mode:
@@ -433,7 +504,7 @@ def main():
                         y0 += 20
 
             if log_writer:
-                row = [time.time()] + [f"{kp.score:.4f}" for kp in keypoints]
+                row = [time.time()] + [f"{kp.score:.4f}" for kp in keypoints_raw]
                 if args.realsense:
                     row += [
                         (f"{depth_features[k]:.4f}" if depth_features and depth_features.get(k) is not None else "")
@@ -467,6 +538,19 @@ def main():
                 hip_score_smoothed = sum(hip_score_history) / len(hip_score_history) if hip_score_history else 0.0
                 warn = "  ※ hip confidence 낮음 — 팔/몸에 가려졌을 수 있음, 확인 권장" if hip_score_smoothed < args.hip_warn_threshold else ""
                 print(f"저장: {out_path} (hip conf: {hip_score_smoothed:.2f}){warn}")
+                if capture_feature_log_writer is not None:
+                    row = [filename, args.participant, args.label, f"{time.time():.3f}"]
+                    row += [
+                        f"{keypoints_raw[0].score:.4f}", f"{keypoints_raw[5].score:.4f}",
+                        f"{keypoints_raw[6].score:.4f}", f"{keypoints_raw[11].score:.4f}",
+                        f"{keypoints_raw[12].score:.4f}",
+                    ]
+                    row += [
+                        (f"{depth_features[k]:.4f}" if depth_features and depth_features.get(k) is not None else "")
+                        for k in DEPTH_FEATURE_KEYS
+                    ]
+                    capture_feature_log_writer.writerow(row)
+                    capture_feature_log_file.flush()
                 serial += 1
                 shots_taken += 1
 
@@ -489,6 +573,9 @@ def main():
         if log_file:
             log_file.close()
             print(f"confidence 로그 저장 완료: {args.log}")
+        if capture_feature_log_file:
+            capture_feature_log_file.close()
+            print(f"촬영 depth 특징 로그 저장 완료: {capture_feature_log_path}")
 
 
 if __name__ == "__main__":
