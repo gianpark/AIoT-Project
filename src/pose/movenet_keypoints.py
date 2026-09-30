@@ -59,6 +59,7 @@ from __future__ import annotations
 import argparse
 import csv
 import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -311,6 +312,11 @@ def main():
         serial = _next_serial(save_dir, args.participant, args.label)
         print(f"캡처 모드: {args.participant} / {args.label} — 's' 키로 저장, 다음 번호부터 시작: {serial:03d}")
 
+    # 화면 표시용 hip confidence는 최근 몇 프레임 평균을 쓴다 — 매 프레임 순간값만 보면
+    # threshold(0.3) 경계에서 0.1초 단위로 초록/빨강이 번갈아 깜빡이는 것처럼 보일 수
+    # 있어서(자연스러운 프레임 간 잡음), 화면이 안정적으로 읽히게 스무딩한다.
+    hip_score_history: deque[float] = deque(maxlen=8)
+
     extractor = MoveNetExtractor(args.model)
     source = _RealSenseSource(args.fps) if args.realsense else _WebcamSource(args.camera)
 
@@ -365,12 +371,14 @@ def main():
                 log_writer.writerow(row)
 
             if capture_mode:
-                hip_score = min(keypoints[11].score, keypoints[12].score)  # left_hip, right_hip
-                hip_ok = hip_score >= args.hip_warn_threshold
+                hip_score = min(keypoints[11].score, keypoints[12].score)  # left_hip, right_hip (순간값)
+                hip_score_history.append(hip_score)
+                hip_score_smoothed = sum(hip_score_history) / len(hip_score_history)  # 화면 표시용 (최근 8프레임 평균)
+                hip_ok = hip_score_smoothed >= args.hip_warn_threshold
                 status_color = (0, 255, 170) if hip_ok else (0, 0, 255)
                 cv2.putText(frame, f"[{args.label}] 다음 저장 번호: {serial:03d}",
                             (10, frame.shape[0] - 46), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
-                cv2.putText(frame, f"hip conf: {hip_score:.2f}{'  (낮음 - 팔/가림 확인)' if not hip_ok else ''}",
+                cv2.putText(frame, f"hip conf: {hip_score_smoothed:.2f}{'  (낮음 - 팔/가림 확인)' if not hip_ok else ''}",
                             (10, frame.shape[0] - 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, status_color, 1, cv2.LINE_AA)
                 cv2.putText(frame, "'s' = 이 프레임 저장, 'q' = 종료", (10, frame.shape[0] - 4),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
@@ -383,9 +391,11 @@ def main():
                 filename = f"{args.participant}_{args.label}_{serial:03d}.jpg"
                 out_path = save_dir / filename
                 cv2.imwrite(str(out_path), raw_frame)
-                hip_score = min(keypoints[11].score, keypoints[12].score)
-                warn = "  ※ hip confidence 낮음 — 팔/몸에 가려졌을 수 있음, 확인 권장" if hip_score < args.hip_warn_threshold else ""
-                print(f"저장: {out_path} (hip conf: {hip_score:.2f}){warn}")
+                # 저장 시점 판단도 화면과 똑같이 스무딩된 값을 기준으로 삼는다 (순간 잡음 하나로
+                # 잘못된 경고가 찍히지 않게).
+                hip_score_smoothed = sum(hip_score_history) / len(hip_score_history) if hip_score_history else 0.0
+                warn = "  ※ hip confidence 낮음 — 팔/몸에 가려졌을 수 있음, 확인 권장" if hip_score_smoothed < args.hip_warn_threshold else ""
+                print(f"저장: {out_path} (hip conf: {hip_score_smoothed:.2f}){warn}")
                 serial += 1
     finally:
         source.release()
