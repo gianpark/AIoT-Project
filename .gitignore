@@ -19,6 +19,7 @@ data/external_wrf/
 *.csv
 !requirements.txt
 !data/labels.csv
+!data/distance_accuracy_log.csv
 
 # 발표자료 QA용으로 렌더링한 슬라이드 이미지 (pptx에서 다시 뽑으면 됨)
 slide-*.jpg

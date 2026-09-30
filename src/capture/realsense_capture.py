@@ -30,6 +30,13 @@
     # 실시간 화면 + 거리·fps 표시 (줄자 대고 거리 정확도 확인, q로 종료)
     python -m src.capture.realsense_capture view
 
+    # 5주차: 여러 거리에서 실측 대조 기록 (40/60/80/100/150/200cm 등에 줄자로 표시해두고,
+    # 그 지점에 십자선을 맞춘 뒤 's'를 눌러 실제 거리(cm)를 입력하면 오차가 CSV에 쌓인다)
+    python -m src.capture.realsense_capture view --log data/distance_accuracy_log.csv
+
+    # 5주차: 필터 파라미터를 바꿔가며 같은 방식으로 비교 (기본값 대비 스무딩을 더 강하게)
+    python -m src.capture.realsense_capture view --log data/distance_accuracy_log.csv --spatial-alpha 0.7 --temporal-alpha 0.6
+
     # 30초 동안 fps/프레임타임 스파이크 자동 측정
     python -m src.capture.realsense_capture gate --seconds 30
 """
@@ -72,7 +79,19 @@ class RealSenseCamera:
     """RealSense 파이프라인을 감싸는 얇은 래퍼 - depth+color 동기화 스트림."""
 
     def __init__(self, width: int = DEFAULT_WIDTH, height: int = DEFAULT_HEIGHT,
-                 fps: int = DEFAULT_FPS, use_filters: bool = True):
+                 fps: int = DEFAULT_FPS, use_filters: bool = True,
+                 spatial_alpha: float | None = None, spatial_delta: float | None = None,
+                 spatial_magnitude: float | None = None,
+                 temporal_alpha: float | None = None, temporal_delta: float | None = None):
+        """
+        spatial_*/temporal_* — 5주차 필터 튜닝용 오버라이드. None이면 RealSense SDK
+        기본값을 그대로 쓴다. 의미(공식 SDK 옵션):
+        - spatial_alpha (0~1, 기본 0.5): 클수록 더 많이 평활화(노이즈↓, 디테일↓)
+        - spatial_delta (1~50, 기본 20): 이 값보다 깊이차가 크면 edge로 보고 보존
+        - spatial_magnitude (1~5, 기본 2): spatial filter 반복 횟수
+        - temporal_alpha (0~1, 기본 0.4): 클수록 이전 프레임 영향을 더 받음(떨림↓, 지연↑)
+        - temporal_delta (1~100, 기본 20): 프레임 간 이 값 넘는 변화는 급격한 실제 변화로 보고 그대로 반영
+        """
         self.width = width
         self.height = height
         self.fps = fps
@@ -86,10 +105,22 @@ class RealSenseCamera:
         # depth를 color 시점으로 정렬 - 같은 픽셀 좌표로 색상/깊이를 함께 참조하기 위함
         self._align = rs.align(rs.stream.color)
 
-        # project.md 6장 "5주차: RealSense depth 프리셋·필터 튜닝"에서 다듬을 필터들.
-        # 지금은 노이즈를 줄이는 기본값으로 켜두고, 5주차에 파라미터를 조정한다.
+        # project.md 6장 "5주차: RealSense depth 프리셋·필터 튜닝"에서 다듬는 필터들.
+        # CLI(--spatial-alpha 등)로 넘어온 값이 있으면 SDK 기본값 대신 그 값을 쓴다.
         self._spatial = rs.spatial_filter()
+        if spatial_alpha is not None:
+            self._spatial.set_option(rs.option.filter_smooth_alpha, spatial_alpha)
+        if spatial_delta is not None:
+            self._spatial.set_option(rs.option.filter_smooth_delta, spatial_delta)
+        if spatial_magnitude is not None:
+            self._spatial.set_option(rs.option.filter_magnitude, spatial_magnitude)
+
         self._temporal = rs.temporal_filter()
+        if temporal_alpha is not None:
+            self._temporal.set_option(rs.option.filter_smooth_alpha, temporal_alpha)
+        if temporal_delta is not None:
+            self._temporal.set_option(rs.option.filter_smooth_delta, temporal_delta)
+
         self._hole_filling = rs.hole_filling_filter()
 
         self._profile = None
@@ -154,11 +185,35 @@ def _view_mode(args: argparse.Namespace) -> None:
     """
     실시간으로 color 프레임 + 중앙 십자선 거리값 + fps를 화면에 띄운다.
     줄자로 실측하면서 눈으로 오차를 확인하는 용도(project.md 4주차 게이트 중 '거리 정확도').
+
+    --log가 주어지면 's' 키를 눌러 현재 SDK 거리값을 기록하고, 그 순간 줄자로 잰 실제
+    거리(cm)를 터미널에 입력하면 오차를 계산해 CSV에 한 줄씩 누적한다(5주차 "거리 정확도
+    정밀 재검증" 용도 — project.md 6장 5주차 항목 참고).
     """
-    with RealSenseCamera(fps=args.fps) as cam:
+    log_path = args.log
+    log_file = None
+    log_writer = None
+    if log_path:
+        import csv
+        from pathlib import Path
+        is_new = not Path(log_path).exists()
+        log_file = open(log_path, "a", newline="", encoding="utf-8")
+        log_writer = csv.writer(log_file)
+        if is_new:
+            log_writer.writerow(["timestamp", "sdk_distance_m", "actual_distance_cm", "actual_distance_m", "error_m", "error_pct", "note"])
+
+    cam_kwargs = dict(
+        fps=args.fps,
+        spatial_alpha=args.spatial_alpha, spatial_delta=args.spatial_delta, spatial_magnitude=args.spatial_magnitude,
+        temporal_alpha=args.temporal_alpha, temporal_delta=args.temporal_delta,
+    )
+    with RealSenseCamera(**cam_kwargs) as cam:
         print("실행 중... 'q'를 누르면 종료합니다. 화면 중앙 십자선까지의 거리가 표시됩니다.")
+        if log_path:
+            print(f"'s'를 누르면 현재 거리값을 기록합니다 → {log_path}에 저장 (터미널 창에서 실제 줄자 거리(cm)를 입력하라는 안내가 뜹니다).")
         prev_t = time.time()
         fps_smoothed = 0.0
+        last_distance = 0.0
         try:
             while True:
                 result = cam.read()
@@ -169,6 +224,7 @@ def _view_mode(args: argparse.Namespace) -> None:
                 h, w = color_image.shape[:2]
                 cx, cy = w // 2, h // 2
                 distance = cam.get_distance_m(depth_frame, cx, cy)
+                last_distance = distance
 
                 now = time.time()
                 dt = now - prev_t
@@ -185,12 +241,35 @@ def _view_mode(args: argparse.Namespace) -> None:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2, cv2.LINE_AA)
                 cv2.putText(color_image, f"fps: {fps_smoothed:.1f}", (10, 54),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+                if log_path:
+                    cv2.putText(color_image, "'s' = 기록", (10, 84),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 170), 2, cv2.LINE_AA)
 
                 cv2.imshow("RealSense D455 (q to quit)", color_image)
-                if cv2.waitKey(1) & 0xFF == ord("q"):
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord("q"):
                     break
+                if key == ord("s") and log_writer is not None:
+                    print(f"\n[기록] 현재 SDK 거리값: {last_distance:.3f} m")
+                    raw = input("  줄자로 잰 실제 거리(cm)를 입력하고 Enter (건너뛰려면 그냥 Enter): ").strip()
+                    if raw:
+                        try:
+                            actual_cm = float(raw)
+                            actual_m = actual_cm / 100.0
+                            error_m = last_distance - actual_m
+                            error_pct = (error_m / actual_m * 100.0) if actual_m else float("nan")
+                            log_writer.writerow([time.time(), f"{last_distance:.4f}", actual_cm, f"{actual_m:.4f}", f"{error_m:.4f}", f"{error_pct:.2f}", ""])
+                            log_file.flush()
+                            print(f"  저장됨 — 오차 {error_m*100:+.1f}cm ({error_pct:+.1f}%)\n")
+                        except ValueError:
+                            print("  숫자로 입력해주세요 — 이번 기록은 건너뜁니다.\n")
+                    else:
+                        print("  건너뜀\n")
         finally:
             cv2.destroyAllWindows()
+            if log_file:
+                log_file.close()
+                print(f"거리 정확도 로그 저장 완료: {log_path}")
 
 
 def _gate_mode(args: argparse.Namespace) -> None:
@@ -242,6 +321,12 @@ def main() -> None:
 
     view_p = sub.add_parser("view", help="실시간 화면 + 거리·fps 표시 (줄자로 거리 정확도 확인용)")
     view_p.add_argument("--fps", type=int, default=DEFAULT_FPS)
+    view_p.add_argument("--log", type=str, default=None, help="거리 정확도 실측 로그 CSV 경로 ('s' 키로 기록, 5주차 정밀 재검증용)")
+    view_p.add_argument("--spatial-alpha", type=float, default=None, help="spatial filter smooth_alpha 오버라이드 (0~1, SDK 기본 0.5)")
+    view_p.add_argument("--spatial-delta", type=float, default=None, help="spatial filter smooth_delta 오버라이드 (1~50, SDK 기본 20)")
+    view_p.add_argument("--spatial-magnitude", type=float, default=None, help="spatial filter 반복 횟수 오버라이드 (1~5, SDK 기본 2)")
+    view_p.add_argument("--temporal-alpha", type=float, default=None, help="temporal filter smooth_alpha 오버라이드 (0~1, SDK 기본 0.4)")
+    view_p.add_argument("--temporal-delta", type=float, default=None, help="temporal filter smooth_delta 오버라이드 (1~100, SDK 기본 20)")
 
     gate_p = sub.add_parser("gate", help="N초 동안 fps/프레임타임 스파이크 자동 측정")
     gate_p.add_argument("--seconds", type=float, default=30.0)
