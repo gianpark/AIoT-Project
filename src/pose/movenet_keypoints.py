@@ -87,6 +87,16 @@ DEPTH_FEATURE_KEYS = [
 # ---------------------------------------------------------------------------
 VALID_LABELS = ["normal", "slouch_forward", "slouch_back", "tilt_left", "tilt_right"]
 
+# data_collection_protocol.md 1번 표의 "촬영 시 지시 문구" — 촬영자(본인)가 카메라 앞에서
+# 화면만 보고도 지금 무슨 자세를 취해야 하는지 바로 알 수 있게 그대로 가져다 쓴다.
+LABEL_INSTRUCTIONS = {
+    "normal": "평소 화면 볼 때처럼 편하게 앉아주세요",
+    "slouch_forward": "화면에 좀 더 집중하듯이 고개를 앞으로 내밀어주세요",
+    "slouch_back": "의자에 기대서 늘어지듯 앉아주세요",
+    "tilt_left": "왼쪽 팔걸이 쪽으로 몸을 기울여주세요",
+    "tilt_right": "오른쪽으로 몸을 기울여주세요",
+}
+
 KEYPOINT_NAMES = [
     "nose",
     "left_eye", "right_eye",
@@ -170,6 +180,53 @@ class MoveNetExtractor:
             Keypoint(name=KEYPOINT_NAMES[i], y=float(raw[i, 0]), x=float(raw[i, 1]), score=float(raw[i, 2]))
             for i in range(17)
         ]
+
+
+# OpenCV 기본 폰트(Hershey)는 한글을 그리지 못한다(깨지거나 아예 안 보임) — 촬영 중
+# "지금 무슨 자세를 취해야 하는지" 화면에서 바로 읽을 수 있게, Pillow + 시스템 한글
+# 폰트(Windows 기본 맑은 고딕)로 따로 그린다. Pillow나 한글 폰트가 없으면 조용히
+# 건너뛴다(터미널에는 항상 출력되므로 기능 자체가 막히지는 않는다).
+_KOREAN_FONT_CANDIDATES = [
+    "C:/Windows/Fonts/malgun.ttf",           # Windows 기본 내장 (맑은 고딕)
+    "C:/Windows/Fonts/malgunbd.ttf",
+    "/System/Library/Fonts/AppleSDGothicNeo.ttc",  # macOS
+    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",  # Linux (설치돼 있는 경우)
+]
+
+
+def _load_korean_font(size: int):
+    try:
+        from PIL import ImageFont
+    except ImportError:
+        return None
+    for path in _KOREAN_FONT_CANDIDATES:
+        if Path(path).exists():
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception:
+                continue
+    return None
+
+
+def draw_text_kr(frame_bgr: np.ndarray, text: str, org: tuple[int, int], font, color_bgr=(255, 255, 255)) -> np.ndarray:
+    """한글이 섞인 텍스트를 프레임에 그린다. font는 _load_korean_font()로 미리 로드해둔
+    것을 넘긴다 — None이면(Pillow/한글 폰트 없음) 아무것도 안 그리고 원본을 그대로 반환."""
+    if font is None:
+        return frame_bgr
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return frame_bgr
+
+    img_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    pil_img = Image.fromarray(img_rgb)
+    draw = ImageDraw.Draw(pil_img)
+    color_rgb = (color_bgr[2], color_bgr[1], color_bgr[0])
+    x, y = org
+    for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):  # 가독성용 검은 외곽선
+        draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0))
+    draw.text((x, y), text, font=font, fill=color_rgb)
+    return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
 
 def draw_skeleton(frame: np.ndarray, keypoints: list[Keypoint], threshold: float, show_labels: bool = False) -> np.ndarray:
@@ -310,7 +367,14 @@ def main():
         save_dir = Path(args.save_dir) / args.participant
         save_dir.mkdir(parents=True, exist_ok=True)
         serial = _next_serial(save_dir, args.participant, args.label)
+        instruction = LABEL_INSTRUCTIONS.get(args.label, args.label)
         print(f"캡처 모드: {args.participant} / {args.label} — 's' 키로 저장, 다음 번호부터 시작: {serial:03d}")
+        print(f"자세 지시: \"{instruction}\"")
+
+    instruction_font = _load_korean_font(30) if capture_mode else None
+    if capture_mode and instruction_font is None:
+        print("(참고: 화면에 한글 안내 문구를 못 그렸습니다 — Pillow 미설치 또는 한글 폰트를 못 찾음. "
+              "터미널에 찍힌 자세 지시 문구를 참고해주세요. 필요하면 `pip install Pillow`)")
 
     # 화면 표시용 hip confidence는 최근 몇 프레임 평균을 쓴다 — 매 프레임 순간값만 보면
     # threshold(0.3) 경계에서 0.1초 단위로 초록/빨강이 번갈아 깜빡이는 것처럼 보일 수
@@ -341,8 +405,13 @@ def main():
             keypoints = extractor.infer(frame)
             frame = draw_skeleton(frame, keypoints, args.threshold, show_labels=args.labels)
 
+            if capture_mode:
+                instruction = LABEL_INSTRUCTIONS.get(args.label, args.label)
+                frame = draw_text_kr(frame, f"[{args.label}] {instruction}", (10, 8),
+                                      instruction_font, color_bgr=(0, 255, 255))
+
             features = compute_posture_features(keypoints)
-            y0 = 24
+            y0 = 60 if capture_mode else 24  # 캡처 모드는 위쪽에 한글 안내 문구가 있어 자리를 비켜준다
             if features:
                 for k, v in features.items():
                     cv2.putText(frame, f"{k}: {v:.1f}", (10, y0), cv2.FONT_HERSHEY_SIMPLEX,

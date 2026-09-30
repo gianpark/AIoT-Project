@@ -11,6 +11,10 @@
 opencv-python==4.13.0.92
 numpy==2.4.4
 
+# 데이터 수집 촬영 모드에서 화면에 한글 자세 지시 문구를 그리기 위해 필요
+# (OpenCV 기본 폰트는 한글을 지원하지 않음 — movenet_keypoints.py의 draw_text_kr 참고)
+Pillow
+
 # 스테레오 카메라 (Intel RealSense D455) — 4주차부터 필요, depth 프레임 획득용
 # (계획 단계엔 oCamS-1CGN-U 기준 위드로봇 SDK였으나 실제 수령 카메라가 RealSense로
 #  바뀌어서 SDK도 교체됨. project.md 2장 결정 로그 참고)
