@@ -43,6 +43,12 @@ TensorFlow Hub의 모델 배포처가 Kaggle Models로 통합되어, 지금은 �
     # confidence 로그를 CSV로 저장 (카메라 프레이밍/keypoint 신뢰도 검증용)
     python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflite \
         --log keypoint_confidence_log.csv --camera 0
+
+    # 데이터 수집용 촬영 (data_collection_protocol.md 4번 절차) — 's' 누르면 그 순간
+    # 프레임을 data/raw/{참가자ID}/{참가자ID}_{클래스}_{일련번호}.jpg 로 저장한다.
+    # 클래스 하나 끝나면 --label만 바꿔서 다시 실행 (다섯 번 반복 = 5클래스).
+    python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflite \
+        --realsense --participant p01 --label normal
 """
 
 from __future__ import annotations
@@ -70,6 +76,8 @@ from src.features.posture_features import compute_posture_features
 # 어떤 keypoint를 실제로 쓸지(상반신/전신)는 src/features/posture_features.py의
 # UPPER_BODY_IDX/LOWER_BODY_IDX 참고.
 # ---------------------------------------------------------------------------
+VALID_LABELS = ["normal", "slouch_forward", "slouch_back", "tilt_left", "tilt_right"]
+
 KEYPOINT_NAMES = [
     "nose",
     "left_eye", "right_eye",
@@ -219,6 +227,17 @@ class _RealSenseSource:
         self._cam.stop()
 
 
+def _next_serial(save_dir: Path, participant: str, label: str) -> int:
+    """이미 저장된 {참가자}_{라벨}_NNN.jpg 파일들을 훑어 다음 일련번호를 정한다."""
+    prefix = f"{participant}_{label}_"
+    existing = []
+    for p in save_dir.glob(f"{prefix}*.jpg"):
+        stem = p.stem[len(prefix):]
+        if stem.isdigit():
+            existing.append(int(stem))
+    return (max(existing) + 1) if existing else 1
+
+
 def main():
     parser = argparse.ArgumentParser(description="MoveNet 17키포인트 실시간 추출/기록")
     parser.add_argument("--model", required=True, help="MoveNet Lightning .tflite 모델 경로")
@@ -229,10 +248,30 @@ def main():
     parser.add_argument("--threshold", type=float, default=0.3, help="시각화용 confidence 임계값")
     parser.add_argument("--labels", action="store_true", help="각 keypoint 점 옆에 이름을 표시 (어떤 점이 어떤 keypoint인지 눈으로 확인용)")
     parser.add_argument("--log", type=str, default=None, help="keypoint별 confidence를 저장할 CSV 경로")
+    parser.add_argument("--participant", type=str, default=None,
+                         help="데이터 수집 캡처 모드 활성화 — 참가자 ID (예: p01). --label과 함께 지정해야 함")
+    parser.add_argument("--label", type=str, default=None, choices=VALID_LABELS,
+                         help=f"데이터 수집 캡처 모드에서 촬영할 자세 클래스 ({', '.join(VALID_LABELS)})")
+    parser.add_argument("--save-dir", type=str, default="data/raw",
+                         help="캡처 모드에서 이미지를 저장할 루트 폴더 (기본 data/raw, 참가자별 하위 폴더 자동 생성)")
+    parser.add_argument("--hip-warn-threshold", type=float, default=0.3,
+                         help="저장 시 hip keypoint confidence가 이 값 미만이면 경고 표시 (팔로 가려짐 등 감지용)")
     args = parser.parse_args()
 
     if not Path(args.model).exists():
         raise SystemExit(f"모델 파일을 찾을 수 없습니다: {args.model} (스크립트 상단 docstring 참고)")
+
+    if bool(args.participant) != bool(args.label):
+        raise SystemExit("--participant와 --label은 함께 지정해야 합니다 (캡처 모드).")
+
+    capture_mode = bool(args.participant)
+    save_dir = None
+    serial = None
+    if capture_mode:
+        save_dir = Path(args.save_dir) / args.participant
+        save_dir.mkdir(parents=True, exist_ok=True)
+        serial = _next_serial(save_dir, args.participant, args.label)
+        print(f"캡처 모드: {args.participant} / {args.label} — 's' 키로 저장, 다음 번호부터 시작: {serial:03d}")
 
     extractor = MoveNetExtractor(args.model)
     source = _RealSenseSource(args.fps) if args.realsense else _WebcamSource(args.camera)
@@ -251,6 +290,7 @@ def main():
             if frame is None:
                 continue
 
+            raw_frame = frame.copy()  # 저장용 원본 (스켈레톤 안 그려진 상태)
             keypoints = extractor.infer(frame)
             frame = draw_skeleton(frame, keypoints, args.threshold, show_labels=args.labels)
 
@@ -265,9 +305,29 @@ def main():
             if log_writer:
                 log_writer.writerow([time.time()] + [f"{kp.score:.4f}" for kp in keypoints])
 
+            if capture_mode:
+                hip_score = min(keypoints[11].score, keypoints[12].score)  # left_hip, right_hip
+                hip_ok = hip_score >= args.hip_warn_threshold
+                status_color = (0, 255, 170) if hip_ok else (0, 0, 255)
+                cv2.putText(frame, f"[{args.label}] 다음 저장 번호: {serial:03d}",
+                            (10, frame.shape[0] - 46), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
+                cv2.putText(frame, f"hip conf: {hip_score:.2f}{'  (낮음 - 팔/가림 확인)' if not hip_ok else ''}",
+                            (10, frame.shape[0] - 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, status_color, 1, cv2.LINE_AA)
+                cv2.putText(frame, "'s' = 이 프레임 저장, 'q' = 종료", (10, frame.shape[0] - 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
             cv2.imshow("MoveNet 17 Keypoints (q to quit)", frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q"):
                 break
+            if capture_mode and key == ord("s"):
+                filename = f"{args.participant}_{args.label}_{serial:03d}.jpg"
+                out_path = save_dir / filename
+                cv2.imwrite(str(out_path), raw_frame)
+                hip_score = min(keypoints[11].score, keypoints[12].score)
+                warn = "  ※ hip confidence 낮음 — 팔/몸에 가려졌을 수 있음, 확인 권장" if hip_score < args.hip_warn_threshold else ""
+                print(f"저장: {out_path} (hip conf: {hip_score:.2f}){warn}")
+                serial += 1
     finally:
         source.release()
         cv2.destroyAllWindows()
