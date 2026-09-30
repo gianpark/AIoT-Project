@@ -17,6 +17,7 @@ import pytest
 
 from src.features.posture_features import (
     angle_deg,
+    compute_depth_features,
     compute_posture_features,
     filter_by_confidence,
     normalize_keypoints,
@@ -105,6 +106,49 @@ def test_compute_posture_features_symmetric_upright_pose():
     assert features["torso_lean_deg"] == pytest.approx(0.0, abs=1e-2)       # 상체가 수직으로 똑바름
     assert features["shoulder_slope_deg"] == pytest.approx(180.0, abs=1e-2)  # 양쪽 어깨가 일직선(비대칭 없음)
     assert features["nose_to_hip_dist"] > 0
+
+
+def test_compute_depth_features_reads_head_chest_hip_and_offsets():
+    kps = make_symmetric_seated_pose()
+
+    # 가짜 depth_lookup: y_norm이 클수록(화면 아래쪽=엉덩이 쪽) 카메라에서 더 먼 것처럼
+    # 선형으로 깊이를 준다 — 정상 자세라면 머리>가슴>엉덩이 순으로 깊이가 커져야 한다.
+    def fake_depth_lookup(x_norm: float, y_norm: float):
+        return 0.5 + y_norm  # 코(y=0.20)->0.70, 어깨 중점(y=0.30)->0.80, 엉덩이 중점(y=0.70)->1.20
+
+    features = compute_depth_features(kps, fake_depth_lookup)
+    assert features is not None
+    assert features["head_depth_m"] == pytest.approx(0.70)
+    assert features["chest_depth_m"] == pytest.approx(0.80)
+    assert features["hip_depth_m"] == pytest.approx(1.20)
+    # 가슴이 머리보다 멀리 있으니(정상 자세) neck_forward_offset_m은 양수여야 한다
+    assert features["neck_forward_offset_m"] == pytest.approx(0.10)
+    assert features["torso_recline_offset_m"] == pytest.approx(0.40)
+
+
+def test_compute_depth_features_partial_when_lookup_returns_none_for_some_points():
+    kps = make_symmetric_seated_pose()
+
+    def partial_lookup(x_norm: float, y_norm: float):
+        # 엉덩이 쪽(y=0.70)만 무효(None) 처리 — 스테레오 매칭 실패 상황을 흉내
+        if y_norm > 0.6:
+            return None
+        return 1.0
+
+    features = compute_depth_features(kps, partial_lookup)
+    assert features is not None
+    assert features["head_depth_m"] == pytest.approx(1.0)
+    assert features["chest_depth_m"] == pytest.approx(1.0)
+    assert features["hip_depth_m"] is None
+    assert features["torso_recline_offset_m"] is None  # hip_depth_m이 없어 계산 불가
+
+
+def test_compute_depth_features_returns_none_when_all_low_confidence():
+    kps = make_symmetric_seated_pose()
+    for idx in (0, 5, 6, 11, 12):
+        kps[idx].score = 0.0
+
+    assert compute_depth_features(kps, lambda x, y: 1.0) is None
 
 
 def test_filter_by_confidence_drops_low_confidence_keypoints():

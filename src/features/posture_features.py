@@ -11,7 +11,7 @@ project.md 5장 1단계에서 정의한 특징 추출(엉덩이 중심 정규화
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 import numpy as np
 
@@ -79,4 +79,69 @@ def compute_posture_features(keypoints: list["Keypoint"]) -> Optional[dict]:
         "torso_lean_deg": angle_deg(neck, hip_center, hip_center + np.array([0.0, -1.0])),  # 상체 앞뒤 기울임
         "shoulder_slope_deg": angle_deg(l_sh, neck, r_sh),  # 어깨 좌우 비대칭
         "nose_to_hip_dist": float(np.linalg.norm(nose - hip_center)),  # 화면과의 거리 대용(가까워지면 값이 커짐)
+    }
+
+
+# depth_lookup 콜백 시그니처: 정규화 좌표(0~1) (x_norm, y_norm)를 받아 해당 지점의
+# depth(m)를 반환한다. 유효하지 않은 지점(범위 밖, 스테레오 매칭 실패 등)이면 None.
+# 이 모듈은 카메라에 의존하지 않는다는 원칙을 지키기 위해, 실제 depth 조회(RealSense
+# depth_frame.get_distance 등)는 호출부(예: src/pose/movenet_keypoints.py의 RealSense
+# 래퍼)가 클로저로 주입한다.
+DepthLookup = Callable[[float, float], Optional[float]]
+
+
+def compute_depth_features(
+    keypoints: list["Keypoint"],
+    depth_lookup: DepthLookup,
+    confidence_threshold: float = 0.3,
+) -> Optional[dict]:
+    """
+    5주차: 판정 로직과 스테레오+포즈 파이프라인 1차 통합용 — 머리(코)/가슴(양쪽 어깨
+    중점)/허리(양쪽 엉덩이 중점) 세 지점의 실측 depth(m)를 읽고, 그 차이로 "앞으로 숙임
+    (거북목)"과 "뒤로 기댐"을 2D 각도보다 직접적으로 판단할 수 있는 특징을 만든다.
+
+    각 keypoint의 confidence가 threshold 미만이거나 depth_lookup이 None을 반환하면
+    (스테레오 매칭 실패·범위 밖 등) 해당 값은 None으로 채운다 — 부분적으로만 유효해도
+    계산 가능한 값은 반환한다.
+
+    반환값:
+    - head_depth_m / chest_depth_m / hip_depth_m: 각 지점의 원시 depth(m)
+    - neck_forward_offset_m: chest_depth_m - head_depth_m
+        양수 = 머리가 가슴보다 카메라에 더 가까움 → 거북목/화면에 목을 빼는 동작의 지표
+    - torso_recline_offset_m: hip_depth_m - chest_depth_m
+        양수 = 엉덩이가 가슴보다 카메라에서 더 멀어짐 → 등받이에 기대는 동작 쪽 지표
+
+    keypoint 3개(코, 어깨 2개, 엉덩이 2개) 전부 confidence 미달이면 None을 반환한다.
+    """
+    nose = keypoints[0]
+    l_sh, r_sh = keypoints[5], keypoints[6]
+    l_hip, r_hip = keypoints[11], keypoints[12]
+
+    def _point_depth(kp: "Keypoint") -> Optional[float]:
+        if kp.score < confidence_threshold:
+            return None
+        return depth_lookup(kp.x, kp.y)
+
+    def _midpoint_depth(a: "Keypoint", b: "Keypoint") -> Optional[float]:
+        if a.score < confidence_threshold or b.score < confidence_threshold:
+            return None
+        return depth_lookup((a.x + b.x) / 2.0, (a.y + b.y) / 2.0)
+
+    head_depth = _point_depth(nose)
+    chest_depth = _midpoint_depth(l_sh, r_sh)
+    hip_depth = _midpoint_depth(l_hip, r_hip)
+
+    if head_depth is None and chest_depth is None and hip_depth is None:
+        return None
+
+    return {
+        "head_depth_m": head_depth,
+        "chest_depth_m": chest_depth,
+        "hip_depth_m": hip_depth,
+        "neck_forward_offset_m": (
+            (chest_depth - head_depth) if head_depth is not None and chest_depth is not None else None
+        ),
+        "torso_recline_offset_m": (
+            (hip_depth - chest_depth) if hip_depth is not None and chest_depth is not None else None
+        ),
     }

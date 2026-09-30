@@ -6,10 +6,13 @@
 ----
 1) 웹캠 또는 RealSense D455의 color 스트림(`--realsense`)에서 MoveNet Lightning으로
    17개 keypoint를 실시간 추출하고 화면에 스켈레톤을 그려 보여준다. 실제 자세 데이터
-   수집은 최종 제품과 화각·렌즈 특성을 맞추기 위해 `--realsense`로 진행한다(depth는
-   아직 결합하지 않음 — 5주차 "판정 로직 1차 통합" 참고).
+   수집은 최종 제품과 화각·렌즈 특성을 맞추기 위해 `--realsense`로 진행한다.
 2) 각 keypoint의 confidence를 CSV로 기록한다 — "상반신만 보이는 책상 구도에서
    어떤 keypoint를 신뢰할 수 있는가"를 실측으로 검증하기 위한 기초 데이터다.
+3) `--realsense`일 때는 머리(코)/가슴(어깨 중점)/허리(엉덩이 중점) 세 지점의 depth(m)와
+   그 차이값(neck_forward_offset_m, torso_recline_offset_m)도 화면에 같이 표시하고,
+   `--log`와 함께 쓰면 CSV에도 기록한다(5주차 "판정 로직과 스테레오+포즈 파이프라인
+   1차 통합" — src/features/posture_features.py의 compute_depth_features 참고).
 
 특징 추출(정규화·각도 계산)은 src/features/posture_features.py로 분리되어 있다
 — 이 모듈은 "포즈 추정" 담당, 그쪽은 "특징 엔지니어링" 담당으로 역할을 나눴다.
@@ -68,7 +71,12 @@ except ImportError as exc:  # pragma: no cover
         "opencv-python이 필요합니다: pip install opencv-python"
     ) from exc
 
-from src.features.posture_features import compute_posture_features
+from src.features.posture_features import compute_depth_features, compute_posture_features
+
+DEPTH_FEATURE_KEYS = [
+    "head_depth_m", "chest_depth_m", "hip_depth_m",
+    "neck_forward_offset_m", "torso_recline_offset_m",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -199,29 +207,59 @@ class _WebcamSource:
         ok, frame = self._cap.read()
         return frame if ok else None
 
+    def get_depth_lookup(self, frame_shape):
+        return None  # 일반 웹캠은 depth가 없음
+
     def release(self) -> None:
         self._cap.release()
 
 
 class _RealSenseSource:
-    """RealSense D455의 color 스트림에서 BGR 프레임을 읽는 소스.
+    """RealSense D455의 color+depth 스트림에서 프레임을 읽는 소스.
 
-    depth는 아직 이 스크립트에서 쓰지 않는다 — 판정 로직에 depth까지 결합하는 건
-    project.md 6장 "5주차: 판정 로직과 스테레오+포즈 파이프라인 1차 통합"에서 할 일이고,
-    지금은 "실제 데이터 수집을 RealSense의 RGB로 하기 위해 카메라 소스만 맞추는" 단계다.
+    5주차 "판정 로직과 스테레오+포즈 파이프라인 1차 통합"부터는 color 프레임에서 뽑은
+    keypoint 좌표를 그대로 같은 순간의 depth 프레임에 대입해, 머리/가슴/허리 각각의
+    실측 거리를 읽을 수 있게 한다(get_depth_lookup). posture_features.py는 카메라에
+    의존하지 않는 순수 모듈이라, depth 조회는 여기서 클로저로 만들어 주입한다.
     """
 
     def __init__(self, fps: int):
-        from src.capture.realsense_capture import RealSenseCamera  # 여기서만 필요해 지연 import
+        from src.capture.realsense_capture import (  # 여기서만 필요해 지연 import
+            MAX_VALID_DEPTH_M,
+            MIN_VALID_DEPTH_M,
+            RealSenseCamera,
+        )
 
+        self._RealSenseCamera = RealSenseCamera
+        self._min_valid = MIN_VALID_DEPTH_M
+        self._max_valid = MAX_VALID_DEPTH_M
         self._cam = RealSenseCamera(fps=fps).start()
+        self._last_depth_frame = None
 
     def read(self):
         result = self._cam.read()
         if result is None:
             return None
-        color_image, _depth_frame, _timestamp_ms = result
+        color_image, depth_frame, _timestamp_ms = result
+        self._last_depth_frame = depth_frame
         return color_image
+
+    def get_depth_lookup(self, frame_shape):
+        """정규화 좌표(x_norm, y_norm) -> depth(m) 콜백을 반환 (마지막 read() 프레임 기준)."""
+        depth_frame = self._last_depth_frame
+        if depth_frame is None:
+            return None
+        h, w = frame_shape[:2]
+        get_distance_m = self._RealSenseCamera.get_distance_m
+        min_valid, max_valid = self._min_valid, self._max_valid
+
+        def _lookup(x_norm: float, y_norm: float):
+            px = int(np.clip(x_norm, 0.0, 1.0) * (w - 1))
+            py = int(np.clip(y_norm, 0.0, 1.0) * (h - 1))
+            d = get_distance_m(depth_frame, px, py)
+            return d if (min_valid <= d <= max_valid) else None
+
+        return _lookup
 
     def release(self) -> None:
         self._cam.stop()
@@ -281,7 +319,10 @@ def main():
     if args.log:
         log_file = open(args.log, "w", newline="", encoding="utf-8")
         log_writer = csv.writer(log_file)
-        log_writer.writerow(["timestamp"] + [f"{name}_score" for name in KEYPOINT_NAMES])
+        header = ["timestamp"] + [f"{name}_score" for name in KEYPOINT_NAMES]
+        if args.realsense:
+            header += DEPTH_FEATURE_KEYS
+        log_writer.writerow(header)
 
     print(f"실행 중 (소스: {'RealSense D455' if args.realsense else f'웹캠 index={args.camera}'})... 'q'를 누르면 종료합니다.")
     try:
@@ -295,15 +336,33 @@ def main():
             frame = draw_skeleton(frame, keypoints, args.threshold, show_labels=args.labels)
 
             features = compute_posture_features(keypoints)
+            y0 = 24
             if features:
-                y0 = 24
                 for k, v in features.items():
                     cv2.putText(frame, f"{k}: {v:.1f}", (10, y0), cv2.FONT_HERSHEY_SIMPLEX,
                                 0.5, (255, 255, 255), 1, cv2.LINE_AA)
                     y0 += 20
 
+            depth_features = None
+            depth_lookup = source.get_depth_lookup(raw_frame.shape) if hasattr(source, "get_depth_lookup") else None
+            if depth_lookup is not None:
+                depth_features = compute_depth_features(keypoints, depth_lookup)
+                if depth_features:
+                    for k in DEPTH_FEATURE_KEYS:
+                        v = depth_features.get(k)
+                        text = f"{k}: {v:.3f}" if v is not None else f"{k}: -"
+                        cv2.putText(frame, text, (10, y0), cv2.FONT_HERSHEY_SIMPLEX,
+                                    0.5, (170, 220, 255), 1, cv2.LINE_AA)
+                        y0 += 20
+
             if log_writer:
-                log_writer.writerow([time.time()] + [f"{kp.score:.4f}" for kp in keypoints])
+                row = [time.time()] + [f"{kp.score:.4f}" for kp in keypoints]
+                if args.realsense:
+                    row += [
+                        (f"{depth_features[k]:.4f}" if depth_features and depth_features.get(k) is not None else "")
+                        for k in DEPTH_FEATURE_KEYS
+                    ]
+                log_writer.writerow(row)
 
             if capture_mode:
                 hip_score = min(keypoints[11].score, keypoints[12].score)  # left_hip, right_hip
