@@ -49,11 +49,11 @@ TensorFlow Hub의 모델 배포처가 Kaggle Models로 통합되어, 지금은 �
 
     # 데이터 수집용 촬영 (data_collection_protocol.md 4번 절차) — 's' 누르면 그 순간
     # 프레임을 data/raw/{참가자ID}/{참가자ID}_{클래스}_{일련번호}.jpg 로 저장한다.
-    # 스크립트를 한 번만 켜두면 클래스당 --shots-per-label(기본 5)장 찍을 때마다
-    # normal → slouch_forward → slouch_back → tilt_left → tilt_right 순서로 자동으로
-    # 넘어간다 ('n' 키로 언제든 수동으로도 넘길 수 있음). 재시작 없이 5클래스 전부 촬영 가능.
+    # 스크립트를 한 번만 켜두고, 원하는 만큼 찍은 뒤 'n' 키를 누르면 바로 다음 클래스로
+    # 넘어간다 (normal → slouch_forward → slouch_back → tilt_left → tilt_right 순서).
+    # 재시작 없이 5클래스 전부 촬영 가능.
     python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflite \
-        --realsense --participant p01 --shots-per-label 5
+        --realsense --participant p01
 """
 
 from __future__ import annotations
@@ -350,9 +350,6 @@ def main():
                          help="데이터 수집 캡처 모드 활성화 — 참가자 ID (예: p01)")
     parser.add_argument("--label", type=str, default=VALID_LABELS[0], choices=VALID_LABELS,
                          help=f"캡처 모드에서 시작할 자세 클래스, 기본 {VALID_LABELS[0]} ({', '.join(VALID_LABELS)})")
-    parser.add_argument("--shots-per-label", type=int, default=5,
-                         help="캡처 모드에서 한 클래스당 이 장수를 찍으면 자동으로 다음 클래스로 넘어감 (기본 5). "
-                              "'n' 키로 언제든 수동으로도 넘길 수 있음")
     parser.add_argument("--save-dir", type=str, default="data/raw",
                          help="캡처 모드에서 이미지를 저장할 루트 폴더 (기본 data/raw, 참가자별 하위 폴더 자동 생성)")
     parser.add_argument("--hip-warn-threshold", type=float, default=0.3,
@@ -366,7 +363,7 @@ def main():
     save_dir = None
     serial = None
     label_idx = VALID_LABELS.index(args.label)
-    shots_taken = 0  # 현재 클래스에서 이번 실행 중에 찍은 장수 (--shots-per-label 도달하면 자동 전환)
+    shots_taken = 0  # 현재 클래스에서 이번 실행 중에 찍은 장수 (화면 표시용 카운터)
     if capture_mode:
         save_dir = Path(args.save_dir) / args.participant
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -374,8 +371,7 @@ def main():
         instruction = LABEL_INSTRUCTIONS.get(args.label, args.label)
         print(f"캡처 모드: {args.participant} / {args.label} — 's' 키로 저장, 다음 번호부터 시작: {serial:03d}")
         print(f"자세 지시: \"{instruction}\"")
-        print(f"클래스당 {args.shots_per_label}장 찍으면 자동으로 다음 클래스로 넘어갑니다. "
-              f"'n' 키로 언제든 바로 넘어갈 수도 있습니다. 순서: {' → '.join(VALID_LABELS)}")
+        print(f"'n' 키를 누르면 원할 때 바로 다음 클래스로 넘어갑니다. 순서: {' → '.join(VALID_LABELS)}")
 
     instruction_font = _load_korean_font(30) if capture_mode else None
     if capture_mode and instruction_font is None:
@@ -451,7 +447,7 @@ def main():
                 hip_score_smoothed = sum(hip_score_history) / len(hip_score_history)  # 화면 표시용 (최근 8프레임 평균)
                 hip_ok = hip_score_smoothed >= args.hip_warn_threshold
                 status_color = (0, 255, 170) if hip_ok else (0, 0, 255)
-                cv2.putText(frame, f"[{args.label}] {shots_taken}/{args.shots_per_label}장 (다음 번호: {serial:03d})",
+                cv2.putText(frame, f"[{args.label}] {shots_taken}장 찍음 (다음 번호: {serial:03d})",
                             (10, frame.shape[0] - 46), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
                 cv2.putText(frame, f"hip conf: {hip_score_smoothed:.2f}{'  (낮음 - 팔/가림 확인)' if not hip_ok else ''}",
                             (10, frame.shape[0] - 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, status_color, 1, cv2.LINE_AA)
@@ -473,9 +469,6 @@ def main():
                 print(f"저장: {out_path} (hip conf: {hip_score_smoothed:.2f}){warn}")
                 serial += 1
                 shots_taken += 1
-                if shots_taken >= args.shots_per_label and label_idx < len(VALID_LABELS) - 1:
-                    print(f"[{args.label}] {args.shots_per_label}장 촬영 완료 — 자동으로 다음 클래스로 넘어갑니다.")
-                    key = ord("n")  # 아래 'n' 처리 분기를 그대로 재사용해서 넘어간다
 
             if capture_mode and key == ord("n"):
                 label_idx += 1
