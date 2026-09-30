@@ -120,7 +120,7 @@ function noteTag(slide, x, y, text, kind) {
     "01   개발 환경 정비 · 데이터 수집 프로토콜", "02   4주차 게이트 측정 결과",
     "03   발견한 설계 리스크: depth 근접 사각지대", "04   선행 논문 데이터로 파이프라인 사전 검증",
     "05   다음 주(5주차) 계획", "06   6~10주차 구현 로드맵",
-    "07   11~15주차 논문·발표 마무리",
+    "07   11~13주차 구현 심화 · 논문 마무리",
   ];
   const colW = 5.55, gapX = 0.5, startX = 0.7, startY = 2.1, rowH = 0.9;
   const perCol = Math.ceil(items.length / 2);
@@ -383,28 +383,29 @@ function noteTag(slide, x, y, text, kind) {
 }
 
 // =====================================================================================
-// 10. WEEKS 11-15 PAPER & FINAL PRESENTATION
+// 10. WEEKS 11-13 IMPLEMENTATION DEEPENING & PAPER WRAP-UP
 // =====================================================================================
 {
   const s = newSlide();
-  pageTitle(s, "11~15주차 논문·발표 마무리", "Roadmap: Weeks 11-15");
+  pageTitle(s, "11~13주차 구현 심화 · 논문 마무리", "Roadmap: Weeks 11-13");
   const plan = [
-    { n: "11", t: "4주차부터 병행 작성해온 논문 구조 확정, 전체 초안 리비전 착수" },
-    { n: "12", t: "리비전 계속, 팀원 간 교차검토(결과 섹션 중심)" },
-    { n: "13", t: "최종 리비전, Multimedia Systems 저널 포맷팅, 논문 전체 리허설 발표" },
-    { n: "14", t: "논문 드래프트 제출(12/2 마감), 제출 후 정리" },
-    { n: "15", t: "캡스톤 최종 발표 — 제출한 논문 내용을 발표용으로 재구성" },
+    { n: "11", t: "구현 심화·보강 — 10주차까지 완료한 항목 중 미흡했던 부분 보완, 추가 검증 (논문: 전체 드래프트 리비전, 팀원 교차검토)" },
+    { n: "12", t: "구현 심화·보강 계속, 종합 테스트 (논문: 최종 리비전, Multimedia Systems 저널 포맷팅)" },
+    { n: "13", t: "최종 구현 마무리, 최종 수치를 논문 Results·Discussion에 반영 → 논문 드래프트 제출(12/2 마감)" },
   ];
   plan.forEach((item, i) => {
-    const y = 1.9 + i * 0.92;
-    s.addShape(pres.ShapeType.roundRect, { x: 0.7, y, w: 11.93, h: 0.8, rectRadius: 0.1, fill: { color: CARD }, line: { type: "none" } });
-    s.addShape(pres.ShapeType.roundRect, { x: 0.9, y: y + 0.2, w: 0.5, h: 0.4, rectRadius: 0.08, fill: { color: "E9FBF7" }, line: { type: "none" } });
-    s.addText(item.n, { x: 0.9, y: y + 0.2, w: 0.5, h: 0.4, align: "center", valign: "middle", fontFace: FONT_BODY, fontSize: 13, bold: true, color: TEAL_DARK, isTextBox: true, margin: 0 });
-    s.addText(item.t, { x: 1.55, y, w: 10.8, h: 0.8, valign: "middle", fontFace: FONT_BODY, fontSize: 13, color: TXT_DARK, isTextBox: true, margin: 0, lineSpacingMultiple: 1.15 });
+    const y = 2.3 + i * 1.15;
+    s.addShape(pres.ShapeType.roundRect, { x: 0.7, y, w: 11.93, h: 1.0, rectRadius: 0.1, fill: { color: CARD }, line: { type: "none" } });
+    s.addShape(pres.ShapeType.roundRect, { x: 0.9, y: y + 0.3, w: 0.5, h: 0.4, rectRadius: 0.08, fill: { color: "E9FBF7" }, line: { type: "none" } });
+    s.addText(item.n, { x: 0.9, y: y + 0.3, w: 0.5, h: 0.4, align: "center", valign: "middle", fontFace: FONT_BODY, fontSize: 13, bold: true, color: TEAL_DARK, isTextBox: true, margin: 0 });
+    s.addText(item.t, { x: 1.55, y, w: 10.8, h: 1.0, valign: "middle", fontFace: FONT_BODY, fontSize: 13, color: TXT_DARK, isTextBox: true, margin: 0, lineSpacingMultiple: 1.15 });
+  });
+  s.addText("논문은 4주차부터 계속 병행 작성해온 방식 그대로입니다. 11~13주차를 논문 전용 기간으로 따로 빼지 않고, 남는 시간을 구현 심화에 씁니다. 계획은 12/2 드래프트 제출까지입니다.", {
+    x: 0.7, y: 6.15, w: 11.93, h: 0.5, fontFace: FONT_BODY, fontSize: 11, italic: true, color: TXT_MUTED, isTextBox: true, margin: 0, lineSpacingMultiple: 1.2,
   });
   s.addText("이상으로 4주차 발표를 마치겠습니다. 질문 받겠습니다.", {
-    x: 0.7, y: 6.65, w: 11.93, h: 0.45, align: "center",
-    fontFace: FONT_BODY, fontSize: 13.5, italic: true, color: TXT_MUTED, isTextBox: true, margin: 0,
+    x: 0.7, y: 6.75, w: 11.93, h: 0.4, align: "center",
+    fontFace: FONT_BODY, fontSize: 13, italic: true, color: TXT_MUTED, isTextBox: true, margin: 0,
   });
   pageNum(s, 10);
 }
