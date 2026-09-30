@@ -49,9 +49,11 @@ TensorFlow Hub의 모델 배포처가 Kaggle Models로 통합되어, 지금은 �
 
     # 데이터 수집용 촬영 (data_collection_protocol.md 4번 절차) — 's' 누르면 그 순간
     # 프레임을 data/raw/{참가자ID}/{참가자ID}_{클래스}_{일련번호}.jpg 로 저장한다.
-    # 클래스 하나 끝나면 --label만 바꿔서 다시 실행 (다섯 번 반복 = 5클래스).
+    # 스크립트를 한 번만 켜두면 클래스당 --shots-per-label(기본 5)장 찍을 때마다
+    # normal → slouch_forward → slouch_back → tilt_left → tilt_right 순서로 자동으로
+    # 넘어간다 ('n' 키로 언제든 수동으로도 넘길 수 있음). 재시작 없이 5클래스 전부 촬영 가능.
     python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflite \
-        --realsense --participant p01 --label normal
+        --realsense --participant p01 --shots-per-label 5
 """
 
 from __future__ import annotations
@@ -345,9 +347,12 @@ def main():
     parser.add_argument("--labels", action="store_true", help="각 keypoint 점 옆에 이름을 표시 (어떤 점이 어떤 keypoint인지 눈으로 확인용)")
     parser.add_argument("--log", type=str, default=None, help="keypoint별 confidence를 저장할 CSV 경로")
     parser.add_argument("--participant", type=str, default=None,
-                         help="데이터 수집 캡처 모드 활성화 — 참가자 ID (예: p01). --label과 함께 지정해야 함")
-    parser.add_argument("--label", type=str, default=None, choices=VALID_LABELS,
-                         help=f"데이터 수집 캡처 모드에서 촬영할 자세 클래스 ({', '.join(VALID_LABELS)})")
+                         help="데이터 수집 캡처 모드 활성화 — 참가자 ID (예: p01)")
+    parser.add_argument("--label", type=str, default=VALID_LABELS[0], choices=VALID_LABELS,
+                         help=f"캡처 모드에서 시작할 자세 클래스, 기본 {VALID_LABELS[0]} ({', '.join(VALID_LABELS)})")
+    parser.add_argument("--shots-per-label", type=int, default=5,
+                         help="캡처 모드에서 한 클래스당 이 장수를 찍으면 자동으로 다음 클래스로 넘어감 (기본 5). "
+                              "'n' 키로 언제든 수동으로도 넘길 수 있음")
     parser.add_argument("--save-dir", type=str, default="data/raw",
                          help="캡처 모드에서 이미지를 저장할 루트 폴더 (기본 data/raw, 참가자별 하위 폴더 자동 생성)")
     parser.add_argument("--hip-warn-threshold", type=float, default=0.3,
@@ -357,12 +362,11 @@ def main():
     if not Path(args.model).exists():
         raise SystemExit(f"모델 파일을 찾을 수 없습니다: {args.model} (스크립트 상단 docstring 참고)")
 
-    if bool(args.participant) != bool(args.label):
-        raise SystemExit("--participant와 --label은 함께 지정해야 합니다 (캡처 모드).")
-
     capture_mode = bool(args.participant)
     save_dir = None
     serial = None
+    label_idx = VALID_LABELS.index(args.label)
+    shots_taken = 0  # 현재 클래스에서 이번 실행 중에 찍은 장수 (--shots-per-label 도달하면 자동 전환)
     if capture_mode:
         save_dir = Path(args.save_dir) / args.participant
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -370,6 +374,8 @@ def main():
         instruction = LABEL_INSTRUCTIONS.get(args.label, args.label)
         print(f"캡처 모드: {args.participant} / {args.label} — 's' 키로 저장, 다음 번호부터 시작: {serial:03d}")
         print(f"자세 지시: \"{instruction}\"")
+        print(f"클래스당 {args.shots_per_label}장 찍으면 자동으로 다음 클래스로 넘어갑니다. "
+              f"'n' 키로 언제든 바로 넘어갈 수도 있습니다. 순서: {' → '.join(VALID_LABELS)}")
 
     instruction_font = _load_korean_font(30) if capture_mode else None
     if capture_mode and instruction_font is None:
@@ -445,11 +451,11 @@ def main():
                 hip_score_smoothed = sum(hip_score_history) / len(hip_score_history)  # 화면 표시용 (최근 8프레임 평균)
                 hip_ok = hip_score_smoothed >= args.hip_warn_threshold
                 status_color = (0, 255, 170) if hip_ok else (0, 0, 255)
-                cv2.putText(frame, f"[{args.label}] 다음 저장 번호: {serial:03d}",
+                cv2.putText(frame, f"[{args.label}] {shots_taken}/{args.shots_per_label}장 (다음 번호: {serial:03d})",
                             (10, frame.shape[0] - 46), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
                 cv2.putText(frame, f"hip conf: {hip_score_smoothed:.2f}{'  (낮음 - 팔/가림 확인)' if not hip_ok else ''}",
                             (10, frame.shape[0] - 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, status_color, 1, cv2.LINE_AA)
-                cv2.putText(frame, "'s' = 이 프레임 저장, 'q' = 종료", (10, frame.shape[0] - 4),
+                cv2.putText(frame, "'s' = 저장, 'n' = 다음 자세로 넘어가기, 'q' = 종료", (10, frame.shape[0] - 4),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
             cv2.imshow("MoveNet 17 Keypoints (q to quit)", frame)
@@ -466,6 +472,24 @@ def main():
                 warn = "  ※ hip confidence 낮음 — 팔/몸에 가려졌을 수 있음, 확인 권장" if hip_score_smoothed < args.hip_warn_threshold else ""
                 print(f"저장: {out_path} (hip conf: {hip_score_smoothed:.2f}){warn}")
                 serial += 1
+                shots_taken += 1
+                if shots_taken >= args.shots_per_label and label_idx < len(VALID_LABELS) - 1:
+                    print(f"[{args.label}] {args.shots_per_label}장 촬영 완료 — 자동으로 다음 클래스로 넘어갑니다.")
+                    key = ord("n")  # 아래 'n' 처리 분기를 그대로 재사용해서 넘어간다
+
+            if capture_mode and key == ord("n"):
+                label_idx += 1
+                if label_idx >= len(VALID_LABELS):
+                    print("모든 클래스(5개) 촬영이 끝났습니다. 'q'로 종료하거나, 필요하면 더 찍어도 됩니다"
+                          f"(마지막 클래스 '{args.label}' 계속 저장됨).")
+                    label_idx = len(VALID_LABELS) - 1  # 마지막 클래스에 그대로 머문다 (원하면 계속 찍을 수 있게)
+                else:
+                    args.label = VALID_LABELS[label_idx]
+                    serial = _next_serial(save_dir, args.participant, args.label)
+                    shots_taken = 0
+                    instruction = LABEL_INSTRUCTIONS.get(args.label, args.label)
+                    print(f"\n다음 클래스: [{args.label}] 다음 번호부터 시작: {serial:03d}")
+                    print(f"자세 지시: \"{instruction}\"")
     finally:
         source.release()
         cv2.destroyAllWindows()
