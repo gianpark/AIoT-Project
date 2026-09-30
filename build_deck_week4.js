@@ -119,7 +119,8 @@ function noteTag(slide, x, y, text, kind) {
   const items = [
     "01   개발 환경 정비 · 데이터 수집 프로토콜", "02   4주차 게이트 측정 결과",
     "03   발견한 설계 리스크: depth 근접 사각지대", "04   선행 논문 데이터로 파이프라인 사전 검증",
-    "05   다음 주(5주차) 계획",
+    "05   다음 주(5주차) 계획", "06   6~10주차 구현 로드맵",
+    "07   11~15주차 논문·발표 마무리",
   ];
   const colW = 5.55, gapX = 0.5, startX = 0.7, startY = 2.1, rowH = 0.9;
   const perCol = Math.ceil(items.length / 2);
@@ -352,13 +353,61 @@ function noteTag(slide, x, y, text, kind) {
     s.addText(item.n, { x: 0.9, y: y + 0.2, w: 0.5, h: 0.4, align: "center", valign: "middle", fontFace: FONT_BODY, fontSize: 13, bold: true, color: TEAL_DARK, isTextBox: true, margin: 0 });
     s.addText(item.t, { x: 1.55, y, w: 10.8, h: 0.8, valign: "middle", fontFace: FONT_BODY, fontSize: 13.5, color: TXT_DARK, isTextBox: true, margin: 0, lineSpacingMultiple: 1.15 });
   });
-  s.addText("질문 받겠습니다", {
-    x: 0.7, y: 6.65, w: 11.93, h: 0.45, align: "center",
-    fontFace: FONT_BODY, fontSize: 13.5, italic: true, color: TXT_MUTED, isTextBox: true, margin: 0,
-  });
   pageNum(s, 8);
 }
 
+// =====================================================================================
+// 9. WEEKS 6-10 IMPLEMENTATION ROADMAP
+// =====================================================================================
+{
+  const s = newSlide();
+  pageTitle(s, "6~10주차 구현 로드맵", "Roadmap: Weeks 6-10");
+  const plan = [
+    { n: "6", t: "데이터 수집·라벨링 마무리, SQLite 저장 계층 구현, RF 기준모델 학습(Feature Selection·Weighting)" },
+    { n: "7", t: "XGBoost·LightGBM을 RF와 동일 데이터·특징으로 공정 비교해 최종 분류기 선정, PyInstaller 패키징 사전 점검" },
+    { n: "8", t: "최종 분류기를 판정 로직에 통합, TTS 알림 연동, 백그라운드 경량화(TFLite 스레드 제한·우선순위 조정)" },
+    { n: "9", t: "백그라운드 최적화 마무리, 일간·주간 리포트 집계 + 이메일 전송 구현" },
+    { n: "10", t: "최종 통합, 종합 성능 평가, (여유 시) 트레이 아이콘·설정창 포함 exe 패키징 완성" },
+  ];
+  plan.forEach((item, i) => {
+    const y = 1.9 + i * 0.92;
+    s.addShape(pres.ShapeType.roundRect, { x: 0.7, y, w: 11.93, h: 0.8, rectRadius: 0.1, fill: { color: CARD }, line: { type: "none" } });
+    s.addShape(pres.ShapeType.roundRect, { x: 0.9, y: y + 0.2, w: 0.5, h: 0.4, rectRadius: 0.08, fill: { color: "E9FBF7" }, line: { type: "none" } });
+    s.addText(item.n, { x: 0.9, y: y + 0.2, w: 0.5, h: 0.4, align: "center", valign: "middle", fontFace: FONT_BODY, fontSize: 13, bold: true, color: TEAL_DARK, isTextBox: true, margin: 0 });
+    s.addText(item.t, { x: 1.55, y, w: 10.8, h: 0.8, valign: "middle", fontFace: FONT_BODY, fontSize: 13, color: TXT_DARK, isTextBox: true, margin: 0, lineSpacingMultiple: 1.15 });
+  });
+  s.addText("논문 초안은 4주차부터 구현과 병행 작성 중 — 이 기간 동안 Methodology·Results 섹션을 함께 채워나갑니다(다음 슬라이드 참고).", {
+    x: 0.7, y: 6.6, w: 11.93, h: 0.45, fontFace: FONT_BODY, fontSize: 11.5, italic: true, color: TXT_MUTED, isTextBox: true, margin: 0,
+  });
+  pageNum(s, 9);
+}
+
+// =====================================================================================
+// 10. WEEKS 11-15 PAPER & FINAL PRESENTATION
+// =====================================================================================
+{
+  const s = newSlide();
+  pageTitle(s, "11~15주차 논문·발표 마무리", "Roadmap: Weeks 11-15");
+  const plan = [
+    { n: "11", t: "4주차부터 병행 작성해온 논문 구조 확정, 전체 초안 리비전 착수" },
+    { n: "12", t: "리비전 계속, 팀원 간 교차검토(결과 섹션 중심)" },
+    { n: "13", t: "최종 리비전, Multimedia Systems 저널 포맷팅, 논문 전체 리허설 발표" },
+    { n: "14", t: "논문 드래프트 제출(12/2 마감), 제출 후 정리" },
+    { n: "15", t: "캡스톤 최종 발표 — 제출한 논문 내용을 발표용으로 재구성" },
+  ];
+  plan.forEach((item, i) => {
+    const y = 1.9 + i * 0.92;
+    s.addShape(pres.ShapeType.roundRect, { x: 0.7, y, w: 11.93, h: 0.8, rectRadius: 0.1, fill: { color: CARD }, line: { type: "none" } });
+    s.addShape(pres.ShapeType.roundRect, { x: 0.9, y: y + 0.2, w: 0.5, h: 0.4, rectRadius: 0.08, fill: { color: "E9FBF7" }, line: { type: "none" } });
+    s.addText(item.n, { x: 0.9, y: y + 0.2, w: 0.5, h: 0.4, align: "center", valign: "middle", fontFace: FONT_BODY, fontSize: 13, bold: true, color: TEAL_DARK, isTextBox: true, margin: 0 });
+    s.addText(item.t, { x: 1.55, y, w: 10.8, h: 0.8, valign: "middle", fontFace: FONT_BODY, fontSize: 13, color: TXT_DARK, isTextBox: true, margin: 0, lineSpacingMultiple: 1.15 });
+  });
+  s.addText("이상으로 4주차 발표를 마치겠습니다. 질문 받겠습니다.", {
+    x: 0.7, y: 6.65, w: 11.93, h: 0.45, align: "center",
+    fontFace: FONT_BODY, fontSize: 13.5, italic: true, color: TXT_MUTED, isTextBox: true, margin: 0,
+  });
+  pageNum(s, 10);
+}
 
 pres.writeFile({ fileName: "barunjase_week4.pptx" }).then(() => {
   console.log("done");
