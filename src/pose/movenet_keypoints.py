@@ -190,23 +190,51 @@ SMOOTHED_KEYPOINT_IDX = [0, 5, 6, 11, 12]  # nose, left_shoulder, right_shoulder
 
 
 class KeypointOcclusionSmoother:
-    """책상 구도 + 위에서 내려다보는 카메라 각도에서는, 머리를 화면 쪽으로 내미는 순간
-    머리가 카메라 시야상 어깨·엉덩이보다 앞쪽에 오면서 그 지점을 가려 confidence가
-    순간적으로 뚝 떨어지는 경우가 있다(5주차 실측으로 발견). 이건 대부분 아주 짧은
-    자기 가림(self-occlusion)이라, confidence가 떨어진 프레임에서는 "마지막으로 확실히
-    잡혔던 위치"를 잠깐(hold_frames 프레임) 유지해서 화면이 튀거나 특징값이 순간적으로
-    엉뚱해지는 걸 막는다. 계속(hold_frames 넘게) 가려지면 결국 원본 저신뢰 값을 그대로
-    내보낸다 — 없는 정보를 영원히 지어내지 않기 위함. score는 원본 값을 그대로 두므로
-    (위치만 보간), confidence 기반 경고·로그는 계속 정상적으로 동작한다.
+    """책상 구도에서 두 가지 자기 가림(self-occlusion) 패턴을 보정한다(5주차 실측으로 발견):
+
+    1) 머리를 화면 쪽으로 내밀 때 머리가 카메라 시야상 어깨·엉덩이보다 앞쪽에 오면서
+       그 지점을 순간적으로 가리는 경우 — 대부분 아주 짧게 지나간다.
+    2) 턱을 괴는 등 팔이 엉덩이 앞을 오래(수 초 이상) 가리는 경우 — 1)과 달리 짧게
+       안 지나가므로, "마지막 위치를 잠깐 유지"만으로는 hold_frames를 넘기면 다시
+       저신뢰로 돌아가 버린다.
+
+    대응 전략은 두 단계다.
+    - **엉덩이(hip)**: 양쪽 어깨가 보이는 동안 "어깨 대비 엉덩이가 어디쯤 있었는지"
+      오프셋을 지수이동평균(EMA)으로 계속 학습해둔다. 엉덩이 confidence가 떨어져도
+      같은 쪽 어깨가 여전히 보이면, "지금 보이는 어깨 위치 + 학습해둔 오프셋"으로
+      엉덩이 위치를 추정한다 — 가려진 동안 몸이 움직여도 어깨를 따라 같이 움직이므로
+      단순히 위치를 얼려두는 것보다 오래 가려져도 안정적이다.
+    - **그 외(코·어깨)**: 기준으로 삼을 다른 keypoint가 마땅치 않으므로, 기존처럼
+      "마지막으로 확실했던 위치"를 최대 hold_frames 프레임만 유지한다.
+
+    두 방법 모두 계속 가려져서 추정 근거(어깨든, 과거 위치든)조차 없으면 결국 원본
+    저신뢰 값을 그대로 내보낸다 — 없는 정보를 영원히 지어내지 않기 위함. score는
+    원본 값을 그대로 두므로(위치만 보정), confidence 기반 경고·로그는 정상 동작한다.
     """
 
-    def __init__(self, hold_frames: int = 10, confidence_threshold: float = 0.3):
+    # hip index -> 같은 쪽 shoulder index (오프셋 추정의 기준점)
+    _HIP_ANCHOR = {11: 5, 12: 6}  # left_hip <- left_shoulder, right_hip <- right_shoulder
+
+    def __init__(self, hold_frames: int = 10, confidence_threshold: float = 0.3, offset_alpha: float = 0.15):
         self.hold_frames = hold_frames
         self.confidence_threshold = confidence_threshold
+        self.offset_alpha = offset_alpha  # 어깨-엉덩이 오프셋 EMA 갱신 속도 (0~1, 클수록 최근 값에 민감)
         self._last_good: dict[int, Keypoint] = {}
         self._held_for: dict[int, int] = {}
+        self._hip_offset: dict[int, tuple[float, float]] = {}  # hip idx -> (dx, dy) = hip - anchor_shoulder (EMA)
 
     def smooth(self, keypoints: list[Keypoint]) -> list[Keypoint]:
+        # 1) 양쪽 다 잘 보이는 동안 어깨 기준 엉덩이 오프셋을 계속 갱신해둔다.
+        for hip_idx, sh_idx in self._HIP_ANCHOR.items():
+            hip_kp, sh_kp = keypoints[hip_idx], keypoints[sh_idx]
+            if hip_kp.score >= self.confidence_threshold and sh_kp.score >= self.confidence_threshold:
+                dx, dy = hip_kp.x - sh_kp.x, hip_kp.y - sh_kp.y
+                prev = self._hip_offset.get(hip_idx)
+                self._hip_offset[hip_idx] = (
+                    (dx, dy) if prev is None else
+                    (prev[0] + self.offset_alpha * (dx - prev[0]), prev[1] + self.offset_alpha * (dy - prev[1]))
+                )
+
         result = list(keypoints)
         for idx in SMOOTHED_KEYPOINT_IDX:
             kp = keypoints[idx]
@@ -215,12 +243,21 @@ class KeypointOcclusionSmoother:
                 self._held_for[idx] = 0
                 continue
 
+            anchor_idx = self._HIP_ANCHOR.get(idx)
+            if anchor_idx is not None and idx in self._hip_offset and keypoints[anchor_idx].score >= self.confidence_threshold:
+                # 엉덩이인데 가려졌고, 기준 어깨는 지금 보임 -> 어깨 기준으로 추정
+                sh = keypoints[anchor_idx]
+                dx, dy = self._hip_offset[idx]
+                self._held_for[idx] = 0
+                result[idx] = Keypoint(name=kp.name, x=sh.x + dx, y=sh.y + dy, score=kp.score)
+                continue
+
             held_so_far = self._held_for.get(idx, 0)
             if idx in self._last_good and held_so_far < self.hold_frames:
                 anchor = self._last_good[idx]
                 self._held_for[idx] = held_so_far + 1
                 result[idx] = Keypoint(name=kp.name, x=anchor.x, y=anchor.y, score=kp.score)
-            # else: 붙잡아둘 게 없거나 hold_frames를 넘겼으면 원본(저신뢰) 값 그대로 둔다
+            # else: 추정 근거(어깨든 과거 위치든)가 없으면 원본(저신뢰) 값 그대로 둔다
 
         return result
 
