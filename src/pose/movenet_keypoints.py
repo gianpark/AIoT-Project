@@ -450,11 +450,12 @@ def _estimate_subject_bounds(keypoints: list[Keypoint], frame_shape, depth_looku
     y_min, y_max = min(ys), max(ys)
     w_norm = max(x_max - x_min, 0.05)
     h_norm = max(y_max - y_min, 0.05)
-    # 코~엉덩이까지만 잡히므로, 몸통·팔·하반신까지 넉넉히 포함되게 여유를 둔다
-    # (위/옆은 적당히, 아래는 하반신 공간을 감안해 더 크게).
-    x_min = max(0.0, x_min - w_norm * 0.6)
-    x_max = min(1.0, x_max + w_norm * 0.6)
-    y_min = max(0.0, y_min - h_norm * 0.5)
+    # 코~엉덩이까지만 잡히므로, 몸통·팔·하반신까지 넉넉히 포함되게 여유를 둔다. 또한 calibration이
+    # 하필 구부정하거나 기울어진 자세일 때 이뤄져도 다른 자세(정자세 등)로 돌아왔을 때 몸이 잘려
+    # 나가지 않도록, 한 자세의 순간 bbox보다 상하좌우로 더 넉넉하게 잡는다.
+    x_min = max(0.0, x_min - w_norm * 0.9)
+    x_max = min(1.0, x_max + w_norm * 0.9)
+    y_min = max(0.0, y_min - h_norm * 0.7)
     y_max = min(1.0, y_max + h_norm * 1.8)
 
     h_px, w_px = frame_shape[:2]
@@ -518,6 +519,11 @@ def main():
     parser.add_argument("--no-auto-calibrate", action="store_true",
                          help="시작 시 자동으로 '컴퓨터 사용자' 위치를 인식하는 기능을 끈다 — "
                               "끄면 --subject-min-depth/--subject-max-depth 값을 처음부터 그대로 사용")
+    parser.add_argument("--calibration-confidence-threshold", type=float, default=0.15,
+                         help="자동 인식(위치 계산)에 쓰는 confidence 기준, 기본 0.15 — "
+                              "--hip-warn-threshold(기본 0.3)보다 낮게 잡아서, 구부정하거나 기울어진 "
+                              "자세처럼 confidence가 원래 낮게 나오는 자세로 시작해도 인식되게 한다 "
+                              "(바른 자세로 앉아 있어야만 인식되는 문제 방지)")
     args = parser.parse_args()
 
     if not Path(args.model).exists():
@@ -599,11 +605,13 @@ def main():
     subject_min_depth = args.subject_min_depth
     subject_max_depth = args.subject_max_depth
     calibration_buffer: list[dict] = []
+    calibration_misses = 0
     CALIBRATION_HITS_NEEDED = 8
+    CALIBRATION_MISS_TOLERANCE = 3  # 이 횟수 안의 실패는 봐주고 계속 모은다 (잠깐의 가림 등)
 
     if auto_calibrate:
-        print("자동 인식: 처음에 화면에 확실하게 잡힌 사람을 '컴퓨터 사용자'로 고정합니다 "
-              "(자리에 앉아 잠시 정면을 봐주세요). 다시 인식하려면 'r' 키.")
+        print("자동 인식: 처음에 화면에 잡힌 사람을 '컴퓨터 사용자'로 고정합니다 — "
+              "구부정하거나 기울어진 자세로 시작해도 괜찮습니다. 다시 인식하려면 'r' 키.")
     elif subject_isolation:
         print(f"전경 분리 사용: {subject_min_depth:.2f}~{subject_max_depth:.2f}m 밖은 검게 지웁니다 "
               f"(여러 명이 잡혀도 그 범위 안 사람만 인식 — 끄려면 --no-subject-isolation)")
@@ -638,11 +646,18 @@ def main():
 
             if auto_calibrate and not calibrated:
                 bounds = _estimate_subject_bounds(keypoints_raw, raw_frame.shape, depth_lookup,
-                                                   args.hip_warn_threshold)
+                                                   args.calibration_confidence_threshold)
                 if bounds is not None:
                     calibration_buffer.append(bounds)
+                    calibration_misses = 0
                 else:
-                    calibration_buffer.clear()  # 중간에 놓치면 처음부터 다시 — 다른 사람이 섞였을 수 있음
+                    # 구부정하거나 기울어진 자세는 원래 confidence가 낮게 나올 수 있어(실측으로 확인),
+                    # 한두 프레임 놓쳤다고 바로 포기하지 않고 몇 번은 봐준다. 그래도 계속 못 잡으면
+                    # 사람이 자리를 비웠거나 다른 사람으로 바뀐 걸로 보고 처음부터 다시 모은다.
+                    calibration_misses += 1
+                    if calibration_misses > CALIBRATION_MISS_TOLERANCE:
+                        calibration_buffer.clear()
+                        calibration_misses = 0
                 if len(calibration_buffer) >= CALIBRATION_HITS_NEEDED:
                     xs = [b["roi_rect"][0] for b in calibration_buffer]
                     ys = [b["roi_rect"][1] for b in calibration_buffer]
@@ -663,7 +678,7 @@ def main():
 
             frame = draw_skeleton(frame, keypoints, args.threshold, show_labels=args.labels)
             if auto_calibrate and not calibrated:
-                cv2.putText(frame, "자동 인식 중... 자리에 앉아 정면을 봐주세요", (10, frame.shape[0] - 12),
+                cv2.putText(frame, "자동 인식 중... (아무 자세나 괜찮음, 화면에 잠시 있어주세요)", (10, frame.shape[0] - 12),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 165, 255), 1, cv2.LINE_AA)
 
             if capture_mode:
@@ -722,7 +737,8 @@ def main():
                 subject_min_depth = args.subject_min_depth
                 subject_max_depth = args.subject_max_depth
                 calibration_buffer.clear()
-                print("다시 자동 인식합니다 — 자리에 앉아 잠시 정면을 봐주세요.")
+                calibration_misses = 0
+                print("다시 자동 인식합니다 — 어떤 자세로 있어도 괜찮습니다.")
             if capture_mode and key == ord("s"):
                 filename = f"{args.participant}_{args.label}_{serial:03d}.jpg"
                 out_path = save_dir / filename
