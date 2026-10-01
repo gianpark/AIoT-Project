@@ -480,17 +480,22 @@ def _estimate_subject_bounds(keypoints: list[Keypoint], frame_shape, depth_looku
 
 
 class _RoiKalmanTracker:
-    """관심영역(ROI)의 중심 위치를 Kalman 필터로 추적한다(박스 크기는 최초 인식 때 고정).
+    """관심영역(ROI)을 추적한다 — 위치는 Kalman 필터, 크기는 느린 EMA로 보정한다.
 
     기존 EMA(지수이동평균) 방식은 그 순간의 추정치로 서서히 수렴할 뿐이라, 사람이
-    잠깐 가려지면 그 자리에 멈춰버린다. Kalman 필터는 위치뿐 아니라 속도도 같이
-    추정해서, keypoint를 놓친 프레임에도 그동안의 이동 방향·속도로 계속 예측하며
-    따라가다가, 다시 측정값이 들어오면 그걸로 보정한다 — "target tracking"에서
-    흔히 쓰는 방식. 박스 크기(w, h)는 추적 대상이 아니라 최초 인식 당시 값을 그대로
-    쓴다(요청에 따라 크기는 고정, 위치만 따라감).
+    잠깐 가려지면 그 자리에 멈춰버린다. 위치는 Kalman 필터로 속도까지 같이 추정해서,
+    keypoint를 놓친 프레임에도 그동안의 이동 방향·속도로 계속 예측하며 따라가다가,
+    다시 측정값이 들어오면 그걸로 보정한다 — "target tracking"에서 흔히 쓰는 방식.
+
+    박스 크기(w, h)는 위치만큼 매 프레임 흔들릴 필요가 없어서 Kalman으로 추적하지
+    않지만, 완전히 고정해두면 최초 인식 당시 사람 크기가 잘못 잡혔거나(예: 그때만
+    팔을 뻗어서 더 크게 잡힘) 사용자가 카메라에 가까워지거나 멀어져 실제 크기가
+    달라졌을 때 박스가 너무 크거나 작게 남는다. 그래서 측정값이 들어올 때마다
+    크기를 천천히(느린 EMA) 실제 사람 크기 쪽으로 보정해, 안정적이면서도 크게
+    어긋나지는 않게 한다.
     """
 
-    def __init__(self):
+    def __init__(self, size_adapt_alpha: float = 0.08):
         self._kf = cv2.KalmanFilter(4, 2)  # 상태: [cx, cy, vcx, vcy], 측정: [cx, cy]
         self._kf.transitionMatrix = np.array([
             [1, 0, 1, 0],
@@ -505,28 +510,35 @@ class _RoiKalmanTracker:
         self._kf.processNoiseCov = np.eye(4, dtype=np.float32) * 1e-2
         self._kf.measurementNoiseCov = np.eye(2, dtype=np.float32) * 5e-1
         self._kf.errorCovPost = np.eye(4, dtype=np.float32)
-        self._w = 1
-        self._h = 1
+        self._size_adapt_alpha = size_adapt_alpha
+        self._w = 1.0
+        self._h = 1.0
 
     def init(self, roi_rect) -> None:
         x, y, w, h = roi_rect
-        self._w, self._h = w, h
+        self._w, self._h = float(w), float(h)
         cx, cy = x + w / 2.0, y + h / 2.0
         state = np.array([[cx], [cy], [0.0], [0.0]], dtype=np.float32)
         self._kf.statePost = state
         self._kf.statePre = state.copy()
 
     def predict(self):
-        """측정값 없이 속도만으로 다음 위치를 예측한다 (가림 등으로 못 잡았을 때 사용)."""
+        """측정값 없이 속도만으로 다음 위치를 예측한다 (가림 등으로 못 잡았을 때 사용).
+        크기는 측정값이 없으므로 직전 크기를 그대로 유지한다."""
         state = self._kf.predict()
         return self._state_to_rect(state)
 
     def correct(self, roi_rect):
-        """새 측정값(중심 위치)으로 보정한다. 박스 크기는 반영하지 않고 고정값을 유지."""
+        """새 측정값(위치+크기)으로 보정한다. 위치는 Kalman으로, 크기는 느린 EMA로 맞춘다."""
         x, y, w, h = roi_rect
         cx, cy = x + w / 2.0, y + h / 2.0
         measurement = np.array([[cx], [cy]], dtype=np.float32)
         state = self._kf.correct(measurement)
+        # 사람이 가까워지거나(박스가 커져야 함) 멀어지면(작아져야 함) 매 프레임 바로
+        # 반영하지 않고 천천히 따라가게 해서, 한두 프레임의 잘못된 측정에 박스가
+        # 출렁이지 않게 한다.
+        self._w += self._size_adapt_alpha * (w - self._w)
+        self._h += self._size_adapt_alpha * (h - self._h)
         return self._state_to_rect(state)
 
     def _state_to_rect(self, state):
@@ -683,9 +695,10 @@ def main():
     CALIBRATION_MISS_TOLERANCE = 3  # 이 횟수 안의 실패는 봐주고 계속 모은다 (잠깐의 가림 등)
 
     # 최초 인식 뒤에도 계속 사용자 위치를 추적해서 관심영역이 따라가게 한다(의자를 당기거나
-    # 몸을 많이 움직여도 영역 밖으로 잘리지 않게). 박스 크기는 최초 인식 때 고정하고, 중심
-    # 위치만 Kalman 필터로 추적한다 — 속도까지 추정해서 잠깐 keypoint를 놓쳐도(가림 등)
-    # 그 방향으로 계속 예측하며 따라가다가 다시 잡히면 보정한다.
+    # 몸을 많이 움직여도 영역 밖으로 잘리지 않게). 중심 위치는 Kalman 필터로 추적한다 —
+    # 속도까지 추정해서 잠깐 keypoint를 놓쳐도(가림 등) 그 방향으로 계속 예측하며 따라가다가
+    # 다시 잡히면 보정한다. 박스 크기는 사용자가 카메라에 가까워지거나 멀어지면 같이 커지거나
+    # 작아지도록 느리게(EMA) 따라간다 — 처음 잡은 크기가 맞지 않아도 서서히 맞춰짐.
     track_subject = auto_calibrate and not args.no_track_subject
     roi_tracker = _RoiKalmanTracker() if track_subject else None
     DEPTH_TRACK_ALPHA = 0.15  # depth 범위는 위치만큼 민감할 필요 없어 기존처럼 EMA로 충분
@@ -755,7 +768,7 @@ def main():
                         subject_max_depth = min(args.subject_max_depth, max(d[1] for d in depth_ranges))
                     calibrated = True
                     if roi_tracker is not None:
-                        roi_tracker.init(roi_rect)  # 이때의 박스 크기로 고정, 위치만 앞으로 추적
+                        roi_tracker.init(roi_rect)  # 이때의 위치·크기를 시작값으로 추적 시작
                     print(f"자동 인식 완료 — ROI={roi_rect}" +
                           (f", depth={subject_min_depth:.2f}~{subject_max_depth:.2f}m" if depth_ranges else "") +
                           " (다시 인식하려면 'r')")
