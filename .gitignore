@@ -11,6 +11,10 @@ models/*.tflite
 # 수집한 원본 이미지/영상은 git에 안 올린다 (개인정보 + 용량)
 data/raw/
 
+# 라벨링 교차검증용 블라인드 샘플 사진도 data/raw/ 원본의 복사본이라 마찬가지로 제외
+# (scripts/prepare_blind_relabel_sample.py 참고) — 매핑/결과 CSV는 메타데이터만 담아 git에 올림
+data/relabel_blind/
+
 # 외부 공개 데이터셋(WRF 논문 등)은 각자 스크립트 안내대로 다시 받는다 (git에 안 올림)
 data/external_wrf/
 
@@ -21,6 +25,8 @@ data/external_wrf/
 !data/labels.csv
 !data/distance_accuracy_log.csv
 !data/capture_features_log.csv
+!data/relabel_mapping.csv
+!data/relabel_results.csv
 
 # 발표자료 QA용으로 렌더링한 슬라이드 이미지 (pptx에서 다시 뽑으면 됨)
 slide-*.jpg
