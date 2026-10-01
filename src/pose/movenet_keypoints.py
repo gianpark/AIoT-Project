@@ -507,10 +507,11 @@ def main():
                          help="저장 시 hip keypoint confidence가 이 값 미만이면 경고 표시 (팔로 가려짐 등 감지용)")
     parser.add_argument("--subject-min-depth", type=float, default=0.3,
                          help="--realsense에서 전경 분리 시 유효 거리 하한(m), 기본 0.3")
-    parser.add_argument("--subject-max-depth", type=float, default=1.3,
-                         help="--realsense에서 전경 분리 시 유효 거리 상한(m), 기본 1.3 "
+    parser.add_argument("--subject-max-depth", type=float, default=1.0,
+                         help="--realsense에서 전경 분리 시 유효 거리 상한(m), 기본 1.0 "
                               "(책상 앞 촬영 대상의 가슴/허리 실측 깊이가 보통 0.6~0.85m인 점을 "
-                              "감안해 여유를 둔 값 — data/capture_features_log.csv 참고)")
+                              "감안한 값 — data/capture_features_log.csv 참고). 자동 인식이 "
+                              "계산한 범위도 이 값을 넘지 않도록 제한된다 — 이보다 먼 것은 항상 지워짐")
     parser.add_argument("--no-subject-isolation", action="store_true",
                          help="--realsense여도 depth 기반 전경 분리(다른 사람 지우기)를 끈다 — "
                               "두 명이 같이 화면에 잡혀야 하는 디버깅 등 특수한 경우에만 사용")
@@ -651,8 +652,10 @@ def main():
                                 int(sum(ws) / len(ws)), int(sum(hs) / len(hs)))
                     depth_ranges = [b["depth_range"] for b in calibration_buffer if b["depth_range"] is not None]
                     if depth_ranges:
-                        subject_min_depth = min(d[0] for d in depth_ranges)
-                        subject_max_depth = max(d[1] for d in depth_ranges)
+                        # 자동 계산값이라도 --subject-min-depth/--subject-max-depth(기본 0.3~1.0m)
+                        # 범위를 벗어나 더 느슨해지지는 않게 한다 — 예: 1m보다 먼 건 항상 지워짐.
+                        subject_min_depth = max(args.subject_min_depth, min(d[0] for d in depth_ranges))
+                        subject_max_depth = min(args.subject_max_depth, max(d[1] for d in depth_ranges))
                     calibrated = True
                     print(f"자동 인식 완료 — ROI={roi_rect}" +
                           (f", depth={subject_min_depth:.2f}~{subject_max_depth:.2f}m" if depth_ranges else "") +
