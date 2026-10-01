@@ -17,9 +17,11 @@
    시작 직후(또는 'r' 키로 재인식 시) 몇 프레임 연속으로 확실하게 잡힌 사람을 "컴퓨터
    사용자"로 보고, 그 사람의 keypoint 위치(ROI)와 — `--realsense`일 때는 — 깊이 범위까지
    자동으로 고정한다(수동으로 사각형을 그릴 필요 없음). 그 뒤로는 범위 밖(다른 사람,
-   배경)을 검게 지워 MoveNet이 애초에 한 사람만 보게 한다. 끄려면 `--no-auto-calibrate`
-   (이 경우 `--subject-min-depth`/`--subject-max-depth`로 지정한 거리 범위만 처음부터
-   고정 적용, `--no-subject-isolation`으로 그마저도 끌 수 있음).
+   배경)을 검게 지워 MoveNet이 애초에 한 사람만 보게 한다. 최초 인식 후에도 사용자가
+   움직이면(의자를 당기거나 몸을 기울이는 등) 매 프레임 위치를 다시 추정해 영역을 서서히
+   따라가게 한다(`--no-track-subject`로 끄면 최초 위치에 고정). 자동 인식 자체를 끄려면
+   `--no-auto-calibrate`(이 경우 `--subject-min-depth`/`--subject-max-depth`로 지정한
+   거리 범위만 처음부터 고정 적용, `--no-subject-isolation`으로 그마저도 끌 수 있음).
 
 특징 추출(정규화·각도 계산)은 src/features/posture_features.py로 분리되어 있다
 — 이 모듈은 "포즈 추정" 담당, 그쪽은 "특징 엔지니어링" 담당으로 역할을 나눴다.
@@ -524,6 +526,9 @@ def main():
                               "--hip-warn-threshold(기본 0.3)보다 낮게 잡아서, 구부정하거나 기울어진 "
                               "자세처럼 confidence가 원래 낮게 나오는 자세로 시작해도 인식되게 한다 "
                               "(바른 자세로 앉아 있어야만 인식되는 문제 방지)")
+    parser.add_argument("--no-track-subject", action="store_true",
+                         help="최초 인식 후 사용자를 계속 따라가며 관심영역을 갱신하는 기능을 끈다 — "
+                              "끄면 최초 인식 당시 위치에 영역이 고정된 채로 유지됨")
     args = parser.parse_args()
 
     if not Path(args.model).exists():
@@ -609,9 +614,16 @@ def main():
     CALIBRATION_HITS_NEEDED = 8
     CALIBRATION_MISS_TOLERANCE = 3  # 이 횟수 안의 실패는 봐주고 계속 모은다 (잠깐의 가림 등)
 
+    # 최초 인식 뒤에도 계속 매 프레임 사용자 위치를 추정해서 관심영역을 서서히 따라가게 한다
+    # (의자를 당기거나 몸을 많이 움직여도 영역 밖으로 잘리지 않게). 급격한 흔들림을 막기 위해
+    # 한 번에 다 반영하지 않고 지수이동평균(EMA)으로 천천히 수렴시킨다.
+    track_subject = auto_calibrate and not args.no_track_subject
+    ROI_TRACK_ALPHA = 0.15
+
     if auto_calibrate:
         print("자동 인식: 처음에 화면에 잡힌 사람을 '컴퓨터 사용자'로 고정합니다 — "
-              "구부정하거나 기울어진 자세로 시작해도 괜찮습니다. 다시 인식하려면 'r' 키.")
+              "구부정하거나 기울어진 자세로 시작해도 괜찮습니다. 다시 인식하려면 'r' 키."
+              + (" 이후 사용자가 움직이면 관심영역도 같이 따라갑니다." if track_subject else ""))
     elif subject_isolation:
         print(f"전경 분리 사용: {subject_min_depth:.2f}~{subject_max_depth:.2f}m 밖은 검게 지웁니다 "
               f"(여러 명이 잡혀도 그 범위 안 사람만 인식 — 끄려면 --no-subject-isolation)")
@@ -675,6 +687,25 @@ def main():
                     print(f"자동 인식 완료 — ROI={roi_rect}" +
                           (f", depth={subject_min_depth:.2f}~{subject_max_depth:.2f}m" if depth_ranges else "") +
                           " (다시 인식하려면 'r')")
+            elif track_subject and calibrated:
+                # 매 프레임 현재 위치를 다시 추정해서, 급격히 덮어쓰지 않고 조금씩만(EMA) 따라간다.
+                # 가려짐 등으로 이번 프레임에 추정이 안 되면 마지막 위치를 그대로 유지한다(잃어버리지 않음).
+                bounds = _estimate_subject_bounds(keypoints_raw, raw_frame.shape, depth_lookup,
+                                                   args.calibration_confidence_threshold)
+                if bounds is not None and roi_rect is not None:
+                    bx, by, bw, bh = bounds["roi_rect"]
+                    rx, ry, rw, rh = roi_rect
+                    roi_rect = (
+                        int(rx + ROI_TRACK_ALPHA * (bx - rx)),
+                        int(ry + ROI_TRACK_ALPHA * (by - ry)),
+                        int(rw + ROI_TRACK_ALPHA * (bw - rw)),
+                        int(rh + ROI_TRACK_ALPHA * (bh - rh)),
+                    )
+                    if subject_isolation and bounds["depth_range"] is not None:
+                        d_min = max(args.subject_min_depth, bounds["depth_range"][0])
+                        d_max = min(args.subject_max_depth, bounds["depth_range"][1])
+                        subject_min_depth += ROI_TRACK_ALPHA * (d_min - subject_min_depth)
+                        subject_max_depth += ROI_TRACK_ALPHA * (d_max - subject_max_depth)
 
             frame = draw_skeleton(frame, keypoints, args.threshold, show_labels=args.labels)
             if auto_calibrate and not calibrated:
