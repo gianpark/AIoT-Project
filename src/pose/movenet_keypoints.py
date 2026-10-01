@@ -479,6 +479,74 @@ def _estimate_subject_bounds(keypoints: list[Keypoint], frame_shape, depth_looku
     return {"roi_rect": (x_px, y_px, w_box, h_box), "depth_range": depth_range}
 
 
+class _RoiKalmanTracker:
+    """관심영역(ROI)의 중심 위치를 Kalman 필터로 추적한다(박스 크기는 최초 인식 때 고정).
+
+    기존 EMA(지수이동평균) 방식은 그 순간의 추정치로 서서히 수렴할 뿐이라, 사람이
+    잠깐 가려지면 그 자리에 멈춰버린다. Kalman 필터는 위치뿐 아니라 속도도 같이
+    추정해서, keypoint를 놓친 프레임에도 그동안의 이동 방향·속도로 계속 예측하며
+    따라가다가, 다시 측정값이 들어오면 그걸로 보정한다 — "target tracking"에서
+    흔히 쓰는 방식. 박스 크기(w, h)는 추적 대상이 아니라 최초 인식 당시 값을 그대로
+    쓴다(요청에 따라 크기는 고정, 위치만 따라감).
+    """
+
+    def __init__(self):
+        self._kf = cv2.KalmanFilter(4, 2)  # 상태: [cx, cy, vcx, vcy], 측정: [cx, cy]
+        self._kf.transitionMatrix = np.array([
+            [1, 0, 1, 0],
+            [0, 1, 0, 1],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],
+        ], dtype=np.float32)
+        self._kf.measurementMatrix = np.array([
+            [1, 0, 0, 0],
+            [0, 1, 0, 0],
+        ], dtype=np.float32)
+        self._kf.processNoiseCov = np.eye(4, dtype=np.float32) * 1e-2
+        self._kf.measurementNoiseCov = np.eye(2, dtype=np.float32) * 5e-1
+        self._kf.errorCovPost = np.eye(4, dtype=np.float32)
+        self._w = 1
+        self._h = 1
+
+    def init(self, roi_rect) -> None:
+        x, y, w, h = roi_rect
+        self._w, self._h = w, h
+        cx, cy = x + w / 2.0, y + h / 2.0
+        state = np.array([[cx], [cy], [0.0], [0.0]], dtype=np.float32)
+        self._kf.statePost = state
+        self._kf.statePre = state.copy()
+
+    def predict(self):
+        """측정값 없이 속도만으로 다음 위치를 예측한다 (가림 등으로 못 잡았을 때 사용)."""
+        state = self._kf.predict()
+        return self._state_to_rect(state)
+
+    def correct(self, roi_rect):
+        """새 측정값(중심 위치)으로 보정한다. 박스 크기는 반영하지 않고 고정값을 유지."""
+        x, y, w, h = roi_rect
+        cx, cy = x + w / 2.0, y + h / 2.0
+        measurement = np.array([[cx], [cy]], dtype=np.float32)
+        state = self._kf.correct(measurement)
+        return self._state_to_rect(state)
+
+    def _state_to_rect(self, state):
+        cx, cy = float(state[0, 0]), float(state[1, 0])
+        return (int(cx - self._w / 2.0), int(cy - self._h / 2.0), int(self._w), int(self._h))
+
+
+def _clamp_rect_to_frame(rect, frame_shape):
+    """ROI 사각형이 화면(프레임) 범위를 벗어나지 않게 자른다 — 추적 중 사람이 화면 가장자리나
+    밖으로 나가 예측치가 범위를 벗어나도, 마스킹에 쓸 때 음수 인덱스 등으로 깨지지 않게 한다.
+    """
+    x, y, w, h = rect
+    h_px, w_px = frame_shape[:2]
+    w = max(1, min(w, w_px))
+    h = max(1, min(h, h_px))
+    x = max(0, min(x, w_px - w))
+    y = max(0, min(y, h_px - h))
+    return (x, y, w, h)
+
+
 def _next_serial(save_dir: Path, participant: str, label: str) -> int:
     """이미 저장된 {참가자}_{라벨}_NNN.jpg 파일들을 훑어 다음 일련번호를 정한다."""
     prefix = f"{participant}_{label}_"
@@ -614,11 +682,13 @@ def main():
     CALIBRATION_HITS_NEEDED = 8
     CALIBRATION_MISS_TOLERANCE = 3  # 이 횟수 안의 실패는 봐주고 계속 모은다 (잠깐의 가림 등)
 
-    # 최초 인식 뒤에도 계속 매 프레임 사용자 위치를 추정해서 관심영역을 서서히 따라가게 한다
-    # (의자를 당기거나 몸을 많이 움직여도 영역 밖으로 잘리지 않게). 급격한 흔들림을 막기 위해
-    # 한 번에 다 반영하지 않고 지수이동평균(EMA)으로 천천히 수렴시킨다.
+    # 최초 인식 뒤에도 계속 사용자 위치를 추적해서 관심영역이 따라가게 한다(의자를 당기거나
+    # 몸을 많이 움직여도 영역 밖으로 잘리지 않게). 박스 크기는 최초 인식 때 고정하고, 중심
+    # 위치만 Kalman 필터로 추적한다 — 속도까지 추정해서 잠깐 keypoint를 놓쳐도(가림 등)
+    # 그 방향으로 계속 예측하며 따라가다가 다시 잡히면 보정한다.
     track_subject = auto_calibrate and not args.no_track_subject
-    ROI_TRACK_ALPHA = 0.15
+    roi_tracker = _RoiKalmanTracker() if track_subject else None
+    DEPTH_TRACK_ALPHA = 0.15  # depth 범위는 위치만큼 민감할 필요 없어 기존처럼 EMA로 충분
 
     if auto_calibrate:
         print("자동 인식: 처음에 화면에 잡힌 사람을 '컴퓨터 사용자'로 고정합니다 — "
@@ -640,7 +710,7 @@ def main():
                 if subject_isolation:
                     combined_mask = source.get_foreground_mask(subject_min_depth, subject_max_depth)
                 if roi_rect is not None:
-                    x, y, w, h = roi_rect
+                    x, y, w, h = _clamp_rect_to_frame(roi_rect, frame.shape)
                     roi_mask = np.zeros(frame.shape[:2], dtype=bool)
                     roi_mask[y:y + h, x:x + w] = True
                     combined_mask = roi_mask if combined_mask is None else (combined_mask & roi_mask)
@@ -684,28 +754,27 @@ def main():
                         subject_min_depth = max(args.subject_min_depth, min(d[0] for d in depth_ranges))
                         subject_max_depth = min(args.subject_max_depth, max(d[1] for d in depth_ranges))
                     calibrated = True
+                    if roi_tracker is not None:
+                        roi_tracker.init(roi_rect)  # 이때의 박스 크기로 고정, 위치만 앞으로 추적
                     print(f"자동 인식 완료 — ROI={roi_rect}" +
                           (f", depth={subject_min_depth:.2f}~{subject_max_depth:.2f}m" if depth_ranges else "") +
                           " (다시 인식하려면 'r')")
             elif track_subject and calibrated:
-                # 매 프레임 현재 위치를 다시 추정해서, 급격히 덮어쓰지 않고 조금씩만(EMA) 따라간다.
-                # 가려짐 등으로 이번 프레임에 추정이 안 되면 마지막 위치를 그대로 유지한다(잃어버리지 않음).
+                # 매 프레임 predict()로 속도 기반 다음 위치를 구하고, keypoint가 이번 프레임에
+                # 잡히면 correct()로 보정한다. 가려짐 등으로 못 잡아도 predict() 결과(그동안의
+                # 이동 방향·속도로 계속 예측한 위치)를 쓰므로 제자리에 멈추지 않고 계속 따라간다.
+                predicted_rect = roi_tracker.predict()
                 bounds = _estimate_subject_bounds(keypoints_raw, raw_frame.shape, depth_lookup,
                                                    args.calibration_confidence_threshold)
-                if bounds is not None and roi_rect is not None:
-                    bx, by, bw, bh = bounds["roi_rect"]
-                    rx, ry, rw, rh = roi_rect
-                    roi_rect = (
-                        int(rx + ROI_TRACK_ALPHA * (bx - rx)),
-                        int(ry + ROI_TRACK_ALPHA * (by - ry)),
-                        int(rw + ROI_TRACK_ALPHA * (bw - rw)),
-                        int(rh + ROI_TRACK_ALPHA * (bh - rh)),
-                    )
+                if bounds is not None:
+                    roi_rect = roi_tracker.correct(bounds["roi_rect"])
                     if subject_isolation and bounds["depth_range"] is not None:
                         d_min = max(args.subject_min_depth, bounds["depth_range"][0])
                         d_max = min(args.subject_max_depth, bounds["depth_range"][1])
-                        subject_min_depth += ROI_TRACK_ALPHA * (d_min - subject_min_depth)
-                        subject_max_depth += ROI_TRACK_ALPHA * (d_max - subject_max_depth)
+                        subject_min_depth += DEPTH_TRACK_ALPHA * (d_min - subject_min_depth)
+                        subject_max_depth += DEPTH_TRACK_ALPHA * (d_max - subject_max_depth)
+                else:
+                    roi_rect = predicted_rect
 
             frame = draw_skeleton(frame, keypoints, args.threshold, show_labels=args.labels)
             if auto_calibrate and not calibrated:
