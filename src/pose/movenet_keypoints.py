@@ -432,6 +432,9 @@ class _RealSenseSource:
 # 자동 인식(캘리브레이션)에 쓸 keypoint: 코, 양 어깨, 양 엉덩이 — occlusion smoothing과
 # 동일한 "상반신 핵심 지점"을 기준으로 삼는다.
 _CALIBRATION_KEYPOINT_IDX = [0, 5, 6, 11, 12]
+_LEFT_SHOULDER_IDX, _RIGHT_SHOULDER_IDX = 5, 6
+# 어깨 너비 대비 가로 폭 배수 — 팔까지 여유 있게 포함되도록 넉넉하게 잡는다.
+_SHOULDER_WIDTH_MARGIN = 2.2
 
 
 def _estimate_subject_bounds(keypoints: list[Keypoint], frame_shape, depth_lookup, confidence_threshold: float):
@@ -441,6 +444,10 @@ def _estimate_subject_bounds(keypoints: list[Keypoint], frame_shape, depth_looku
     깊이로 그 사람 주변의 대략적인 범위를 계산해 자동 인식에 쓴다. 신뢰할 수 있는
     keypoint가 2개 미만이면(아직 사람이 제대로 안 잡혔거나 가림이 심함) None을 반환해
     호출부가 이번 프레임은 건너뛰게 한다.
+
+    가로 폭은 양 어깨가 둘 다 잡히면 어깨 너비를 기준으로 정한다 — 순간적인 팔 벌림
+    등에 덜 민감하고, 몸통의 실제 '폭'을 더 안정적으로 대표한다. 어깨가 둘 다 안
+    잡히면(가려짐 등) 기존처럼 keypoint들의 bbox 기반으로 대체한다.
     """
     confident = [keypoints[i] for i in _CALIBRATION_KEYPOINT_IDX if keypoints[i].score >= confidence_threshold]
     if len(confident) < 2:
@@ -450,13 +457,25 @@ def _estimate_subject_bounds(keypoints: list[Keypoint], frame_shape, depth_looku
     ys = [kp.y for kp in confident]
     x_min, x_max = min(xs), max(xs)
     y_min, y_max = min(ys), max(ys)
-    w_norm = max(x_max - x_min, 0.05)
     h_norm = max(y_max - y_min, 0.05)
-    # 코~엉덩이까지만 잡히므로, 몸통·팔·하반신까지 넉넉히 포함되게 여유를 둔다. 또한 calibration이
-    # 하필 구부정하거나 기울어진 자세일 때 이뤄져도 다른 자세(정자세 등)로 돌아왔을 때 몸이 잘려
-    # 나가지 않도록, 한 자세의 순간 bbox보다 상하좌우로 더 넉넉하게 잡는다.
-    x_min = max(0.0, x_min - w_norm * 0.9)
-    x_max = min(1.0, x_max + w_norm * 0.9)
+
+    left_sh, right_sh = keypoints[_LEFT_SHOULDER_IDX], keypoints[_RIGHT_SHOULDER_IDX]
+    if left_sh.score >= confidence_threshold and right_sh.score >= confidence_threshold:
+        shoulder_center_x = (left_sh.x + right_sh.x) / 2.0
+        shoulder_width = max(abs(right_sh.x - left_sh.x), 0.05)
+        half_w = shoulder_width * _SHOULDER_WIDTH_MARGIN / 2.0
+        x_min = shoulder_center_x - half_w
+        x_max = shoulder_center_x + half_w
+    else:
+        w_norm = max(x_max - x_min, 0.05)
+        x_min -= w_norm * 0.9
+        x_max += w_norm * 0.9
+    x_min = max(0.0, x_min)
+    x_max = min(1.0, x_max)
+
+    # 코~엉덩이까지만 잡히므로, 머리 위·하반신까지 넉넉히 포함되게 세로로 여유를 둔다. 또한
+    # calibration이 하필 구부정하거나 기울어진 자세일 때 이뤄져도 다른 자세(정자세 등)로
+    # 돌아왔을 때 몸이 잘려 나가지 않도록, 한 자세의 순간 bbox보다 더 넉넉하게 잡는다.
     y_min = max(0.0, y_min - h_norm * 0.7)
     y_max = min(1.0, y_max + h_norm * 1.8)
 
@@ -487,12 +506,10 @@ class _RoiKalmanTracker:
     keypoint를 놓친 프레임에도 그동안의 이동 방향·속도로 계속 예측하며 따라가다가,
     다시 측정값이 들어오면 그걸로 보정한다 — "target tracking"에서 흔히 쓰는 방식.
 
-    박스 크기(w, h)는 위치만큼 매 프레임 흔들릴 필요가 없어서 Kalman으로 추적하지
-    않지만, 완전히 고정해두면 최초 인식 당시 사람 크기가 잘못 잡혔거나(예: 그때만
-    팔을 뻗어서 더 크게 잡힘) 사용자가 카메라에 가까워지거나 멀어져 실제 크기가
-    달라졌을 때 박스가 너무 크거나 작게 남는다. 그래서 측정값이 들어올 때마다
-    크기를 천천히(느린 EMA) 실제 사람 크기 쪽으로 보정해, 안정적이면서도 크게
-    어긋나지는 않게 한다.
+    가로 폭(w)은 어깨 너비 기준으로 계산된 측정값을 따라 느린 EMA로 서서히 맞춰간다 —
+    사용자가 카메라에 가까워지거나 멀어지면 어깨가 화면에서 더 크거나 작게 보이므로
+    자연스럽게 같이 커지거나 작아진다. 세로 길이(h)는 요청에 따라 최초 인식 때 값으로
+    완전히 고정하고 이후 다시 바꾸지 않는다.
     """
 
     def __init__(self, size_adapt_alpha: float = 0.08):
@@ -529,16 +546,16 @@ class _RoiKalmanTracker:
         return self._state_to_rect(state)
 
     def correct(self, roi_rect):
-        """새 측정값(위치+크기)으로 보정한다. 위치는 Kalman으로, 크기는 느린 EMA로 맞춘다."""
+        """새 측정값(위치+가로폭)으로 보정한다. 위치는 Kalman, 가로폭은 느린 EMA, 세로
+        길이는 최초 인식 값 그대로 고정."""
         x, y, w, h = roi_rect
         cx, cy = x + w / 2.0, y + h / 2.0
         measurement = np.array([[cx], [cy]], dtype=np.float32)
         state = self._kf.correct(measurement)
         # 사람이 가까워지거나(박스가 커져야 함) 멀어지면(작아져야 함) 매 프레임 바로
         # 반영하지 않고 천천히 따라가게 해서, 한두 프레임의 잘못된 측정에 박스가
-        # 출렁이지 않게 한다.
+        # 출렁이지 않게 한다. 세로 길이는 건드리지 않는다(요청에 따라 고정).
         self._w += self._size_adapt_alpha * (w - self._w)
-        self._h += self._size_adapt_alpha * (h - self._h)
         return self._state_to_rect(state)
 
     def _state_to_rect(self, state):
