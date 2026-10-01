@@ -348,6 +348,9 @@ class _WebcamSource:
     def get_depth_lookup(self, frame_shape):
         return None  # 일반 웹캠은 depth가 없음
 
+    def get_foreground_mask(self, min_depth_m: float, max_depth_m: float):
+        return None  # 일반 웹캠은 depth가 없어 전경 분리 불가
+
     def release(self) -> None:
         self._cap.release()
 
@@ -399,6 +402,20 @@ class _RealSenseSource:
 
         return _lookup
 
+    def get_foreground_mask(self, min_depth_m: float, max_depth_m: float):
+        """[min_depth_m, max_depth_m] 범위 안에 있는 픽셀만 True인 마스크를 반환한다
+        (마지막 read() 프레임 기준). MoveNet은 SinglePose 모델이라 사람이 둘 이상
+        잡히면 어느 쪽을 추적할지 보장이 안 되는데(5주차 실측으로 발견), 촬영 대상은
+        항상 카메라에서 가까운 거리(책상 앞)에 있다는 전제로, 그보다 먼 범위(다른 사람,
+        배경)를 아예 검게 지워 MoveNet이 애초에 한 사람만 보게 만든다. 범위 밖(0 포함,
+        무효값)은 전부 제외된다.
+        """
+        depth_frame = self._last_depth_frame
+        if depth_frame is None:
+            return None
+        depth_m = self._cam.get_depth_image_m(depth_frame)
+        return (depth_m >= min_depth_m) & (depth_m <= max_depth_m)
+
     def release(self) -> None:
         self._cam.stop()
 
@@ -432,6 +449,15 @@ def main():
                          help="캡처 모드에서 이미지를 저장할 루트 폴더 (기본 data/raw, 참가자별 하위 폴더 자동 생성)")
     parser.add_argument("--hip-warn-threshold", type=float, default=0.3,
                          help="저장 시 hip keypoint confidence가 이 값 미만이면 경고 표시 (팔로 가려짐 등 감지용)")
+    parser.add_argument("--subject-min-depth", type=float, default=0.3,
+                         help="--realsense에서 전경 분리 시 유효 거리 하한(m), 기본 0.3")
+    parser.add_argument("--subject-max-depth", type=float, default=1.3,
+                         help="--realsense에서 전경 분리 시 유효 거리 상한(m), 기본 1.3 "
+                              "(책상 앞 촬영 대상의 가슴/허리 실측 깊이가 보통 0.6~0.85m인 점을 "
+                              "감안해 여유를 둔 값 — data/capture_features_log.csv 참고)")
+    parser.add_argument("--no-subject-isolation", action="store_true",
+                         help="--realsense여도 depth 기반 전경 분리(다른 사람 지우기)를 끈다 — "
+                              "두 명이 같이 화면에 잡혀야 하는 디버깅 등 특수한 경우에만 사용")
     args = parser.parse_args()
 
     if not Path(args.model).exists():
@@ -500,6 +526,11 @@ def main():
     elif capture_mode and not args.realsense:
         print("(참고: --realsense 없이는 depth 특징을 기록할 수 없습니다 — 사진만 저장됩니다.)")
 
+    subject_isolation = args.realsense and not args.no_subject_isolation
+    if subject_isolation:
+        print(f"전경 분리 사용: {args.subject_min_depth:.2f}~{args.subject_max_depth:.2f}m 밖은 검게 지웁니다 "
+              f"(여러 명이 잡혀도 그 범위 안 사람만 인식 — 끄려면 --no-subject-isolation)")
+
     print(f"실행 중 (소스: {'RealSense D455' if args.realsense else f'웹캠 index={args.camera}'})... 'q'를 누르면 종료합니다.")
     try:
         while True:
@@ -507,7 +538,12 @@ def main():
             if frame is None:
                 continue
 
-            raw_frame = frame.copy()  # 저장용 원본 (스켈레톤 안 그려진 상태)
+            if subject_isolation:
+                mask = source.get_foreground_mask(args.subject_min_depth, args.subject_max_depth)
+                if mask is not None:
+                    frame[~mask] = 0  # 지정 거리 밖(다른 사람/배경)은 검게 지워 MoveNet이 못 보게 함
+
+            raw_frame = frame.copy()  # 저장용 원본 (스켈레톤 안 그려진 상태, 전경 분리는 반영됨)
             keypoints_raw = extractor.infer(frame)
             # 화면 표시·특징 계산에는 자기 가림 보정을 적용한 값을 쓰고, confidence 로그에는
             # 원본 점수를 그대로 남긴다(보정은 위치만 바꾸고 score는 원본을 유지하긴 하지만,

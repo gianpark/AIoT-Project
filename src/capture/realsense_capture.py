@@ -134,6 +134,8 @@ class RealSenseCamera:
                 "- USB 3.0/3.1 Type-C 포트에 꽂혀있는지 확인\n"
                 "- realsense-viewer로 먼저 인식되는지 확인 (README 참고)"
             ) from exc
+        # depth 원시값(uint16)을 미터로 바꾸는 배율 — 전경/배경 분리(get_depth_image_m)에 필요
+        self.depth_scale = self._profile.get_device().first_depth_sensor().get_depth_scale()
         return self
 
     def stop(self) -> None:
@@ -179,6 +181,17 @@ class RealSenseCamera:
     def get_distance_m(depth_frame, x: int, y: int) -> float:
         """(x, y) 픽셀의 추정 거리(미터)."""
         return float(depth_frame.get_distance(x, y))
+
+    def get_depth_image_m(self, depth_frame) -> np.ndarray:
+        """depth_frame 전체를 (color와 같은 해상도의) 미터 단위 2D 배열로 변환한다.
+        픽셀 단위로 get_distance()를 매번 호출하면 느려서(848x480=약 40만 번/프레임),
+        원시 uint16 배열을 한 번에 numpy로 변환한 뒤 depth_scale을 곱한다. 사람이 둘 이상
+        잡힐 때 "카메라에서 가까운 범위만 남기고 나머지는 지우는" 전경 분리에 쓴다
+        (src/pose/movenet_keypoints.py의 _RealSenseSource.get_foreground_mask 참고).
+        값이 0인 픽셀은 무효(거리 측정 실패) — 호출부에서 min_depth_m > 0으로 두면
+        자연히 걸러진다.
+        """
+        return np.asanyarray(depth_frame.get_data()).astype(np.float32) * self.depth_scale
 
 
 def _view_mode(args: argparse.Namespace) -> None:
