@@ -13,6 +13,11 @@
    그 차이값(neck_forward_offset_m, torso_recline_offset_m)도 화면에 같이 표시하고,
    `--log`와 함께 쓰면 CSV에도 기록한다(5주차 "판정 로직과 스테레오+포즈 파이프라인
    1차 통합" — src/features/posture_features.py의 compute_depth_features 참고).
+4) 화면에 여러 사람이 잡혀도 컴퓨터 사용자 한 명만 인식하도록 두 가지 마스킹을 지원한다:
+   - `--realsense`일 때 거리 기준 전경 분리(`--subject-min-depth`/`--subject-max-depth`,
+     기본 0.3~1.3m 밖은 검게 지움, 끄려면 `--no-subject-isolation`)
+   - 실행 중 'r' 키로 "내 자리" 사각 영역을 직접 지정(웹캠에서도 사용 가능) — 거리는
+     비슷해도 옆에 다른 사람이 앉아있는 경우처럼 거리만으로 못 거르는 상황을 보완한다.
 
 특징 추출(정규화·각도 계산)은 src/features/posture_features.py로 분리되어 있다
 — 이 모듈은 "포즈 추정" 담당, 그쪽은 "특징 엔지니어링" 담당으로 역할을 나눴다.
@@ -531,19 +536,32 @@ def main():
         print(f"전경 분리 사용: {args.subject_min_depth:.2f}~{args.subject_max_depth:.2f}m 밖은 검게 지웁니다 "
               f"(여러 명이 잡혀도 그 범위 안 사람만 인식 — 끄려면 --no-subject-isolation)")
 
-    print(f"실행 중 (소스: {'RealSense D455' if args.realsense else f'웹캠 index={args.camera}'})... 'q'를 누르면 종료합니다.")
+    # 관심영역(ROI): "컴퓨터 사용자가 앉는 자리"를 화면에서 직접 사각형으로 지정해두면,
+    # depth가 비슷해도(예: 옆에 나란히 앉은 사람) 그 영역 밖은 지워서 인식 대상에서
+    # 제외한다. depth 전경 분리(거리 기준)와는 독립적인 보완 수단 — 웹캠(depth 없음)에서도
+    # 쓸 수 있다. 'r' 키로 지정/재지정, 빈 영역으로 선택(ESC)하면 해제.
+    roi_rect = None  # (x, y, w, h), 픽셀 좌표
+
+    print("실행 중 ('r' 키로 '내 자리' 영역 지정 가능, 그 밖은 지워서 다른 사람 제외) "
+          f"(소스: {'RealSense D455' if args.realsense else f'웹캠 index={args.camera}'})... 'q'를 누르면 종료합니다.")
     try:
         while True:
             frame = source.read()
             if frame is None:
                 continue
 
+            combined_mask = None
             if subject_isolation:
-                mask = source.get_foreground_mask(args.subject_min_depth, args.subject_max_depth)
-                if mask is not None:
-                    frame[~mask] = 0  # 지정 거리 밖(다른 사람/배경)은 검게 지워 MoveNet이 못 보게 함
+                combined_mask = source.get_foreground_mask(args.subject_min_depth, args.subject_max_depth)
+            if roi_rect is not None:
+                x, y, w, h = roi_rect
+                roi_mask = np.zeros(frame.shape[:2], dtype=bool)
+                roi_mask[y:y + h, x:x + w] = True
+                combined_mask = roi_mask if combined_mask is None else (combined_mask & roi_mask)
+            if combined_mask is not None:
+                frame[~combined_mask] = 0  # 범위 밖(다른 사람/배경)은 검게 지워 MoveNet이 못 보게 함
 
-            raw_frame = frame.copy()  # 저장용 원본 (스켈레톤 안 그려진 상태, 전경 분리는 반영됨)
+            raw_frame = frame.copy()  # 저장용 원본 (스켈레톤 안 그려진 상태, 마스킹은 반영됨)
             keypoints_raw = extractor.infer(frame)
             # 화면 표시·특징 계산에는 자기 가림 보정을 적용한 값을 쓰고, confidence 로그에는
             # 원본 점수를 그대로 남긴다(보정은 위치만 바꾸고 score는 원본을 유지하긴 하지만,
@@ -595,13 +613,26 @@ def main():
                             (10, frame.shape[0] - 46), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
                 cv2.putText(frame, f"hip conf: {hip_score_smoothed:.2f}{'  (낮음 - 팔/가림 확인)' if not hip_ok else ''}",
                             (10, frame.shape[0] - 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, status_color, 1, cv2.LINE_AA)
-                cv2.putText(frame, "'s' = 저장, 'n' = 다음 자세로 넘어가기, 'q' = 종료", (10, frame.shape[0] - 4),
+                cv2.putText(frame, "'s' = 저장, 'n' = 다음 자세, 'r' = 내 자리 지정, 'q' = 종료", (10, frame.shape[0] - 4),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
             cv2.imshow("MoveNet 17 Keypoints (q to quit)", frame)
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
                 break
+            if key == ord("r"):
+                selected = cv2.selectROI(
+                    "'내 자리' 영역을 드래그로 지정 (Enter/Space=확정, ESC=해제)",
+                    raw_frame, showCrosshair=True, fromCenter=False,
+                )
+                cv2.destroyWindow("'내 자리' 영역을 드래그로 지정 (Enter/Space=확정, ESC=해제)")
+                x, y, w, h = selected
+                if w > 0 and h > 0:
+                    roi_rect = (x, y, w, h)
+                    print(f"관심영역(ROI) 지정됨: x={x}, y={y}, w={w}, h={h} — 이 밖은 지워집니다.")
+                else:
+                    roi_rect = None
+                    print("관심영역(ROI) 해제됨 — 다시 전체 화면을 봅니다.")
             if capture_mode and key == ord("s"):
                 filename = f"{args.participant}_{args.label}_{serial:03d}.jpg"
                 out_path = save_dir / filename
