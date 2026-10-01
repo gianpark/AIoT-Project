@@ -13,11 +13,13 @@
    그 차이값(neck_forward_offset_m, torso_recline_offset_m)도 화면에 같이 표시하고,
    `--log`와 함께 쓰면 CSV에도 기록한다(5주차 "판정 로직과 스테레오+포즈 파이프라인
    1차 통합" — src/features/posture_features.py의 compute_depth_features 참고).
-4) 화면에 여러 사람이 잡혀도 컴퓨터 사용자 한 명만 인식하도록 두 가지 마스킹을 지원한다:
-   - `--realsense`일 때 거리 기준 전경 분리(`--subject-min-depth`/`--subject-max-depth`,
-     기본 0.3~1.3m 밖은 검게 지움, 끄려면 `--no-subject-isolation`)
-   - 실행 중 'r' 키로 "내 자리" 사각 영역을 직접 지정(웹캠에서도 사용 가능) — 거리는
-     비슷해도 옆에 다른 사람이 앉아있는 경우처럼 거리만으로 못 거르는 상황을 보완한다.
+4) 화면에 여러 사람이 잡혀도 컴퓨터 사용자 한 명만 인식하도록 자동 인식 기능을 지원한다.
+   시작 직후(또는 'r' 키로 재인식 시) 몇 프레임 연속으로 확실하게 잡힌 사람을 "컴퓨터
+   사용자"로 보고, 그 사람의 keypoint 위치(ROI)와 — `--realsense`일 때는 — 깊이 범위까지
+   자동으로 고정한다(수동으로 사각형을 그릴 필요 없음). 그 뒤로는 범위 밖(다른 사람,
+   배경)을 검게 지워 MoveNet이 애초에 한 사람만 보게 한다. 끄려면 `--no-auto-calibrate`
+   (이 경우 `--subject-min-depth`/`--subject-max-depth`로 지정한 거리 범위만 처음부터
+   고정 적용, `--no-subject-isolation`으로 그마저도 끌 수 있음).
 
 특징 추출(정규화·각도 계산)은 src/features/posture_features.py로 분리되어 있다
 — 이 모듈은 "포즈 추정" 담당, 그쪽은 "특징 엔지니어링" 담당으로 역할을 나눴다.
@@ -425,6 +427,55 @@ class _RealSenseSource:
         self._cam.stop()
 
 
+# 자동 인식(캘리브레이션)에 쓸 keypoint: 코, 양 어깨, 양 엉덩이 — occlusion smoothing과
+# 동일한 "상반신 핵심 지점"을 기준으로 삼는다.
+_CALIBRATION_KEYPOINT_IDX = [0, 5, 6, 11, 12]
+
+
+def _estimate_subject_bounds(keypoints: list[Keypoint], frame_shape, depth_lookup, confidence_threshold: float):
+    """현재 프레임의 keypoint로 '사용자가 있는 범위'(ROI·depth)를 추정한다.
+
+    수동으로 사각형을 그리지 않아도, 화면에 확실하게 잡힌 사람의 코/어깨/엉덩이 위치와
+    깊이로 그 사람 주변의 대략적인 범위를 계산해 자동 인식에 쓴다. 신뢰할 수 있는
+    keypoint가 2개 미만이면(아직 사람이 제대로 안 잡혔거나 가림이 심함) None을 반환해
+    호출부가 이번 프레임은 건너뛰게 한다.
+    """
+    confident = [keypoints[i] for i in _CALIBRATION_KEYPOINT_IDX if keypoints[i].score >= confidence_threshold]
+    if len(confident) < 2:
+        return None
+
+    xs = [kp.x for kp in confident]
+    ys = [kp.y for kp in confident]
+    x_min, x_max = min(xs), max(xs)
+    y_min, y_max = min(ys), max(ys)
+    w_norm = max(x_max - x_min, 0.05)
+    h_norm = max(y_max - y_min, 0.05)
+    # 코~엉덩이까지만 잡히므로, 몸통·팔·하반신까지 넉넉히 포함되게 여유를 둔다
+    # (위/옆은 적당히, 아래는 하반신 공간을 감안해 더 크게).
+    x_min = max(0.0, x_min - w_norm * 0.6)
+    x_max = min(1.0, x_max + w_norm * 0.6)
+    y_min = max(0.0, y_min - h_norm * 0.5)
+    y_max = min(1.0, y_max + h_norm * 1.8)
+
+    h_px, w_px = frame_shape[:2]
+    x_px = int(x_min * (w_px - 1))
+    y_px = int(y_min * (h_px - 1))
+    w_box = max(1, int((x_max - x_min) * (w_px - 1)))
+    h_box = max(1, int((y_max - y_min) * (h_px - 1)))
+
+    depth_range = None
+    if depth_lookup is not None:
+        depths = []
+        for kp in confident:
+            d = depth_lookup(kp.x, kp.y)
+            if d is not None:
+                depths.append(d)
+        if depths:
+            depth_range = (max(0.05, min(depths) - 0.35), max(depths) + 0.35)
+
+    return {"roi_rect": (x_px, y_px, w_box, h_box), "depth_range": depth_range}
+
+
 def _next_serial(save_dir: Path, participant: str, label: str) -> int:
     """이미 저장된 {참가자}_{라벨}_NNN.jpg 파일들을 훑어 다음 일련번호를 정한다."""
     prefix = f"{participant}_{label}_"
@@ -463,6 +514,9 @@ def main():
     parser.add_argument("--no-subject-isolation", action="store_true",
                          help="--realsense여도 depth 기반 전경 분리(다른 사람 지우기)를 끈다 — "
                               "두 명이 같이 화면에 잡혀야 하는 디버깅 등 특수한 경우에만 사용")
+    parser.add_argument("--no-auto-calibrate", action="store_true",
+                         help="시작 시 자동으로 '컴퓨터 사용자' 위치를 인식하는 기능을 끈다 — "
+                              "끄면 --subject-min-depth/--subject-max-depth 값을 처음부터 그대로 사용")
     args = parser.parse_args()
 
     if not Path(args.model).exists():
@@ -532,18 +586,28 @@ def main():
         print("(참고: --realsense 없이는 depth 특징을 기록할 수 없습니다 — 사진만 저장됩니다.)")
 
     subject_isolation = args.realsense and not args.no_subject_isolation
-    if subject_isolation:
-        print(f"전경 분리 사용: {args.subject_min_depth:.2f}~{args.subject_max_depth:.2f}m 밖은 검게 지웁니다 "
+    auto_calibrate = not args.no_auto_calibrate
+
+    # 수동으로 사각형을 그리는 대신, 화면에 잡힌 사람의 keypoint 위치·깊이로 "컴퓨터 사용자가
+    # 있는 범위"를 자동으로 추정한다 — 시작 직후(또는 'r' 키로 재인식 시) 몇 프레임 연속으로
+    # 확실하게 잡힌 사람을 그 사용자로 보고 ROI·depth 범위를 고정한다. 그 전까지는 마스킹 없이
+    # 전체 화면을 보고(그래서 계산 자체가 가능), 고정된 뒤부터는 그 범위 밖을 지워 다른 사람이
+    # 끼어들어도 무시한다.
+    calibrated = not auto_calibrate  # 자동 인식을 끄면 처음부터 CLI로 받은 거리 범위를 그대로 사용
+    roi_rect = None  # (x, y, w, h), 픽셀 좌표
+    subject_min_depth = args.subject_min_depth
+    subject_max_depth = args.subject_max_depth
+    calibration_buffer: list[dict] = []
+    CALIBRATION_HITS_NEEDED = 8
+
+    if auto_calibrate:
+        print("자동 인식: 처음에 화면에 확실하게 잡힌 사람을 '컴퓨터 사용자'로 고정합니다 "
+              "(자리에 앉아 잠시 정면을 봐주세요). 다시 인식하려면 'r' 키.")
+    elif subject_isolation:
+        print(f"전경 분리 사용: {subject_min_depth:.2f}~{subject_max_depth:.2f}m 밖은 검게 지웁니다 "
               f"(여러 명이 잡혀도 그 범위 안 사람만 인식 — 끄려면 --no-subject-isolation)")
 
-    # 관심영역(ROI): "컴퓨터 사용자가 앉는 자리"를 화면에서 직접 사각형으로 지정해두면,
-    # depth가 비슷해도(예: 옆에 나란히 앉은 사람) 그 영역 밖은 지워서 인식 대상에서
-    # 제외한다. depth 전경 분리(거리 기준)와는 독립적인 보완 수단 — 웹캠(depth 없음)에서도
-    # 쓸 수 있다. 'r' 키로 지정/재지정, 빈 영역으로 선택(ESC)하면 해제.
-    roi_rect = None  # (x, y, w, h), 픽셀 좌표
-
-    print("실행 중 ('r' 키로 '내 자리' 영역 지정 가능, 그 밖은 지워서 다른 사람 제외) "
-          f"(소스: {'RealSense D455' if args.realsense else f'웹캠 index={args.camera}'})... 'q'를 누르면 종료합니다.")
+    print(f"실행 중 (소스: {'RealSense D455' if args.realsense else f'웹캠 index={args.camera}'})... 'q'를 누르면 종료합니다.")
     try:
         while True:
             frame = source.read()
@@ -551,15 +615,16 @@ def main():
                 continue
 
             combined_mask = None
-            if subject_isolation:
-                combined_mask = source.get_foreground_mask(args.subject_min_depth, args.subject_max_depth)
-            if roi_rect is not None:
-                x, y, w, h = roi_rect
-                roi_mask = np.zeros(frame.shape[:2], dtype=bool)
-                roi_mask[y:y + h, x:x + w] = True
-                combined_mask = roi_mask if combined_mask is None else (combined_mask & roi_mask)
-            if combined_mask is not None:
-                frame[~combined_mask] = 0  # 범위 밖(다른 사람/배경)은 검게 지워 MoveNet이 못 보게 함
+            if calibrated:
+                if subject_isolation:
+                    combined_mask = source.get_foreground_mask(subject_min_depth, subject_max_depth)
+                if roi_rect is not None:
+                    x, y, w, h = roi_rect
+                    roi_mask = np.zeros(frame.shape[:2], dtype=bool)
+                    roi_mask[y:y + h, x:x + w] = True
+                    combined_mask = roi_mask if combined_mask is None else (combined_mask & roi_mask)
+                if combined_mask is not None:
+                    frame[~combined_mask] = 0  # 범위 밖(다른 사람/배경)은 검게 지워 MoveNet이 못 보게 함
 
             raw_frame = frame.copy()  # 저장용 원본 (스켈레톤 안 그려진 상태, 마스킹은 반영됨)
             keypoints_raw = extractor.infer(frame)
@@ -567,7 +632,36 @@ def main():
             # 원본 점수를 그대로 남긴다(보정은 위치만 바꾸고 score는 원본을 유지하긴 하지만,
             # 로그는 항상 extractor가 준 원본 리스트를 기준으로 쓴다).
             keypoints = occlusion_smoother.smooth(keypoints_raw)
+
+            depth_lookup = source.get_depth_lookup(raw_frame.shape) if hasattr(source, "get_depth_lookup") else None
+
+            if auto_calibrate and not calibrated:
+                bounds = _estimate_subject_bounds(keypoints_raw, raw_frame.shape, depth_lookup,
+                                                   args.hip_warn_threshold)
+                if bounds is not None:
+                    calibration_buffer.append(bounds)
+                else:
+                    calibration_buffer.clear()  # 중간에 놓치면 처음부터 다시 — 다른 사람이 섞였을 수 있음
+                if len(calibration_buffer) >= CALIBRATION_HITS_NEEDED:
+                    xs = [b["roi_rect"][0] for b in calibration_buffer]
+                    ys = [b["roi_rect"][1] for b in calibration_buffer]
+                    ws = [b["roi_rect"][2] for b in calibration_buffer]
+                    hs = [b["roi_rect"][3] for b in calibration_buffer]
+                    roi_rect = (int(sum(xs) / len(xs)), int(sum(ys) / len(ys)),
+                                int(sum(ws) / len(ws)), int(sum(hs) / len(hs)))
+                    depth_ranges = [b["depth_range"] for b in calibration_buffer if b["depth_range"] is not None]
+                    if depth_ranges:
+                        subject_min_depth = min(d[0] for d in depth_ranges)
+                        subject_max_depth = max(d[1] for d in depth_ranges)
+                    calibrated = True
+                    print(f"자동 인식 완료 — ROI={roi_rect}" +
+                          (f", depth={subject_min_depth:.2f}~{subject_max_depth:.2f}m" if depth_ranges else "") +
+                          " (다시 인식하려면 'r')")
+
             frame = draw_skeleton(frame, keypoints, args.threshold, show_labels=args.labels)
+            if auto_calibrate and not calibrated:
+                cv2.putText(frame, "자동 인식 중... 자리에 앉아 정면을 봐주세요", (10, frame.shape[0] - 12),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 165, 255), 1, cv2.LINE_AA)
 
             if capture_mode:
                 instruction = LABEL_INSTRUCTIONS.get(args.label, args.label)
@@ -583,7 +677,6 @@ def main():
                     y0 += 20
 
             depth_features = None
-            depth_lookup = source.get_depth_lookup(raw_frame.shape) if hasattr(source, "get_depth_lookup") else None
             if depth_lookup is not None:
                 depth_features = compute_depth_features(keypoints, depth_lookup)
                 if depth_features:
@@ -613,26 +706,20 @@ def main():
                             (10, frame.shape[0] - 46), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
                 cv2.putText(frame, f"hip conf: {hip_score_smoothed:.2f}{'  (낮음 - 팔/가림 확인)' if not hip_ok else ''}",
                             (10, frame.shape[0] - 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, status_color, 1, cv2.LINE_AA)
-                cv2.putText(frame, "'s' = 저장, 'n' = 다음 자세, 'r' = 내 자리 지정, 'q' = 종료", (10, frame.shape[0] - 4),
+                cv2.putText(frame, "'s' = 저장, 'n' = 다음 자세, 'r' = 다시 자동 인식, 'q' = 종료", (10, frame.shape[0] - 4),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
             cv2.imshow("MoveNet 17 Keypoints (q to quit)", frame)
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
                 break
-            if key == ord("r"):
-                selected = cv2.selectROI(
-                    "'내 자리' 영역을 드래그로 지정 (Enter/Space=확정, ESC=해제)",
-                    raw_frame, showCrosshair=True, fromCenter=False,
-                )
-                cv2.destroyWindow("'내 자리' 영역을 드래그로 지정 (Enter/Space=확정, ESC=해제)")
-                x, y, w, h = selected
-                if w > 0 and h > 0:
-                    roi_rect = (x, y, w, h)
-                    print(f"관심영역(ROI) 지정됨: x={x}, y={y}, w={w}, h={h} — 이 밖은 지워집니다.")
-                else:
-                    roi_rect = None
-                    print("관심영역(ROI) 해제됨 — 다시 전체 화면을 봅니다.")
+            if key == ord("r") and auto_calibrate:
+                calibrated = False
+                roi_rect = None
+                subject_min_depth = args.subject_min_depth
+                subject_max_depth = args.subject_max_depth
+                calibration_buffer.clear()
+                print("다시 자동 인식합니다 — 자리에 앉아 잠시 정면을 봐주세요.")
             if capture_mode and key == ord("s"):
                 filename = f"{args.participant}_{args.label}_{serial:03d}.jpg"
                 out_path = save_dir / filename
