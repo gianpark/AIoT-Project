@@ -95,3 +95,9 @@ def test_near_invalid_face_counts_as_forward_and_proximity():
     j = judge(kps(), {"head_depth_m": None, "chest_depth_m": None, "hip_depth_m": None,
                       "torso_recline_offset_m": None, "near_invalid": True})
     assert j.proximity and j.posture_level == WARNING and j.posture_kind == "slouch_forward"
+
+
+def test_proximity_without_hip_depth_is_forward_lean():
+    j = judge(kps(), {"head_depth_m": 0.35, "chest_depth_m": 0.5, "hip_depth_m": None,
+                      "torso_recline_offset_m": None})
+    assert j.proximity and j.posture_kind == "slouch_forward" and j.posture_level == WARNING

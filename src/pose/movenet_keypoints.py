@@ -873,8 +873,8 @@ def main():
                                   fallback_depth_m=proximity_estimator.estimate_depth(sh_w))
                 color = {NORMAL: (0, 255, 170), CAUTION: (0, 200, 255), WARNING: (0, 0, 255)}[judgement.posture_level]
                 kind = f" ({judgement.posture_kind})" if judgement.posture_kind else ""
-                near = "  [화면 근접]" if judgement.proximity else ""
-                cv2.putText(frame, f"{judgement.posture_level}{kind}{near}", (frame.shape[1] - 330, 28),
+                near = "  [NEAR]" if judgement.proximity else ""
+                cv2.putText(frame, f"{ {NORMAL: 'NORMAL', CAUTION: 'CAUTION', WARNING: 'WARNING'}[judgement.posture_level]}{kind}{near}", (frame.shape[1] - 470, 28),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2, cv2.LINE_AA)
                 now = time.time()
                 if last_sample_t is None or now - last_sample_t >= args.sample_interval:
