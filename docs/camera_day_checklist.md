@@ -1,0 +1,85 @@
+# D455 카메라 확보일 체크리스트
+
+카메라가 있는 날 **한 번에** 끝낼 일을 순서대로 정리했다. 위에서부터 하면 앞 단계 결과가 뒤 단계에 쓰인다.
+예상 총 소요: 약 1시간 30분~2시간 (A~D 약 1시간, E 수집은 사람·시간에 따라 추가).
+
+모든 명령은 프로젝트 루트(`aiot_project`)에서, 가상환경을 켠 상태(`.venv\Scripts\activate`)로 실행한다.
+모델 경로는 `models/movenet_lightning_int8.tflite`.
+
+## 시작 전 준비 (5분)
+
+- [ ] 카메라를 평소 책상 위치에 고정 (정렬: 화면 정면, 높이·각도를 이번 기록 `--note`에 적어둘 것)
+- [ ] USB 3.0 포트 연결 확인 → `python -m src.capture.realsense_capture gate --seconds 10` 로 프레임이 들어오는지, fps ≥ 8 인지 확인
+- [ ] `git pull` 로 최신 코드 받기, `python -m pytest -q` 로 테스트 통과 확인
+- [ ] 책상에는 촬영·측정에 참여하는 사람만 화면에 있게 하기 (자동 사용자 인식 전제)
+
+## A. depth 필터 튜닝 (약 20분)
+
+목표: 기본 필터 프리셋 결정 + 4.68m 이상치 원인 확인.
+
+사용자는 평소 작업 거리에서 가만히 앉고, 프리셋이 바뀔 때마다 화면 중앙 사각형에 **가슴**을 맞춘다.
+
+- [ ] 60cm: `python -m src.capture.realsense_capture filters --out data/depth_filter_tuning.csv --note "60cm 정면 <조명>"`
+- [ ] 40~45cm (근접 경계): `... --note "42cm 정면 <조명>"`
+- [ ] 80cm: `... --note "80cm 정면 <조명>"`
+- [ ] (시간 되면) 조명을 바꿔(창가/형광등만/어두움) 60cm 한 번 더
+
+판단 기준 (표에서 거리별로 같이 볼 것):
+- fps가 목표(8~10) 아래로 떨어지는 프리셋은 제외
+- **시간떨림 mm·튐 %** 가 가장 낮은 쪽 우선. 필터없음 대비 이 두 값이 확실히 줄어야 필터를 쓸 가치가 있다
+- 패치유효 %는 높을수록 좋지만, 구멍메우기가 올린 유효율만 믿지 말 것 — 구멍메우기없음 대비 떨림·튐이 나빠지면 구멍메우기를 끈다
+- 40cm 근처에서 유효 %가 0에 가깝게 나오면 정상(사각지대) → 근접 보완 쪽에서 해결
+- 4.68m 같은 이상치가 "SDK기본"에서만 보이고 "구멍메우기없음"에서 사라지면 홀 필링 영향으로 확정
+
+- [ ] 결과로 기본 프리셋 선택 → `RealSenseCamera` 기본값 반영(Claude에게 표 전달) → `project.md` 5주차 5번에 결과 기록
+
+## B. 판정(`--judge`) 실측 검증 (약 20분)
+
+```
+python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflite --realsense --judge --labels
+```
+
+시작 직후 사용자만 화면에 있는 상태에서 자동 인식이 되는지 확인(박스 고정 후 "자동 인식 중" 문구 사라짐). 이후 각 자세를 15~20초씩 유지하며 화면 우측 상단 판정과 터미널 `[알림]`을 기록한다.
+
+| 자세 | 기대 판정 | 확인 |
+|---|---|---|
+| 바른 자세 | 정상 | [ ] |
+| 앞으로 숙임 | 주의/경고 (slouch_forward) | [ ] |
+| 뒤로 기댐 | 주의/경고 (slouch_back) | [ ] |
+| 화면 오른쪽으로 기울임 | tilt_left (본인 기준 왼쪽) | [ ] |
+| 화면 왼쪽으로 기울임 | tilt_right (본인 기준 오른쪽) | [ ] |
+| 화면에 얼굴 가까이 (40cm 미만) | 근접 알림 1회 → 60초 쿨다운 | [ ] |
+| 자세 경고를 15초 이상 유지 | 연속 3회 후 자세 알림 1회 → 5분 쿨다운 | [ ] |
+
+기록할 것: 잘못 판정된 자세, 판정이 흔들린 구간(주의↔경고 깜빡임), 임계값 조정이 필요해 보이는 방향.
+- [ ] 근접 보완: 처음 30초는 정상 거리(50~60cm)로 앉아 k를 학습시킨 뒤 천천히 다가가 depth가 사라지는 구간(<40cm)에서 "어깨너비 추정" 근접 메시지가 뜨는지 확인
+- [ ] ROI 추적: 앉은 채 좌우로 움직이고 잠깐 일어났다 앉아도 박스가 따라오는지, `r` 키 재인식이 되는지 확인
+- [ ] 다인 환경: 사용자 뒤 1m 밖에 다른 사람이 서 있어도 사용자만 잡히는지
+
+## C. 임계값 메모 (5분)
+
+`src/logic/decision.py`의 잠정값(PROXIMITY_DEPTH_M 0.40, RECLINE_WARN_M 0.10, LATERAL_WARN 0.35)을 B 결과와 비교해 방향만 메모한다. 확정은 6주차(RULA 참고 + RF 결과)에 하므로 여기서는 바꾸지 않아도 된다.
+
+## D. 추가 데이터 수집 (사람당 약 30분)
+
+프로토콜 권장: 3~5명, 날짜·조명·복장 분산. 현재 p01·p02, 단일 날짜. 이번에 **새 참가자(p03~) 또는 다른 조명/복장의 p01·p02** 를 우선한다.
+
+```
+python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflite --realsense --participant p03
+```
+
+- `s` 저장, `n` 다음 클래스 (normal → slouch_forward → slouch_back → tilt_left → tilt_right), 클래스당 최소 40장 이상
+- 저장 시 hip 경고가 뜬 사진은 다시 찍기
+- `data/labels.csv` 반영 (이전에 쓰던 라벨 생성 스크립트/절차 그대로)
+- 촬영한 날 조명·복장은 labels.csv의 lighting/note에 적기
+
+## E. 마무리 (10분)
+
+- [ ] `data/depth_filter_tuning.csv`, `data/capture_features_log.csv`, `data/labels.csv` 커밋·푸시 (원본 사진 `data/raw/`는 git 제외)
+- [ ] Claude에게 전달: ① 필터 비교 표 ② B 체크 결과(틀린 자세·메모) ③ 새로 수집한 장수
+- [ ] 카메라 반납 전 위 세 가지가 끝났는지 재확인 — 나중에 depth 값은 복구할 수 없다
+
+## 카메라 없이 미리 해둘 수 있는 것
+
+- 팀원 블라인드 라벨링 결과 수령 후 `python scripts/compare_relabels.py --filled data/relabel_blind/relabel_template.csv`
+- 논문: Related Work 마무리, System Architecture 초안
