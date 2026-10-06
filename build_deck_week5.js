@@ -133,7 +133,7 @@ const W_OPT = { ...C_OPT, fill: { color: "FDEFE8" }, color: "9A3F1F", bold: true
   const items = [
     "01   5주차 계획 대비 진행 상황", "02   데이터 수집 현황 · 라벨링 교차검증",
     "03   촬영 중 발견한 문제와 대응", "04   판정 로직 · 근접 보완 · 카메라 실측",
-    "05   교수님 피드백과 방향 재정리", "06   절대값 판정 설계 · 선행연구 근거",
+    "05   교수님 피드백과 방향 재정리", "06   절대값 판정 설계",
     "07   한계 · 카메라 확보 후 할 일 · 6주차 계획",
   ];
   const colW = 5.55, gapX = 0.5, startX = 0.7, startY = 2.1, rowH = 0.9;
@@ -414,39 +414,7 @@ const W_OPT = { ...C_OPT, fill: { color: "FDEFE8" }, color: "9A3F1F", bold: true
 }
 
 // =====================================================================================
-// 12. PRIOR WORK EVIDENCE
-// =====================================================================================
-{
-  const s = newSlide();
-  pageTitle(s, "선행연구로 본 근거와 한계", "Prior Work");
-  const papers = [
-    { icon: "book", title: "Manghisi 외 (2017) · Kinect v2 K2RULA",
-      items: ["깊이 카메라로 RULA를 실시간 계산. 광학 모션캡처와 총점 일치 0.97(κ=0.87), RULA 전문가와 0.96(κ=0.84)",
-        "몸통 굽힘을 수직 방향 대비 각도로 계산 → 우리 접근과 같은 계열",
-        "RULA는 구간이 넓어 각도 오차 영향이 줄어듦 → 정상/주의/경고 구간 설계의 근거",
-        "한계: 배우 1명, 실험실, 가림 없음. 인용된 연구에서 Kinect v2 목 각도 오차 큼 → 거북목 특징 주의"] },
-    { icon: "book", title: "Rodrigues 외 (2022) · 3D-AJA",
-      items: ["사무직 20명, 6가지 책상 세팅. 각도계 대비 평균 오차 5.6~8.5° (Kinect SDK 8.3~18.2°)",
-        "2D keypoint + 깊이로 3D 각도 계산이 SDK 골격보다 정확 → 우리 구성(MoveNet + depth)과 같은 계열",
-        "임상 기준(±5°)은 이 논문도 못 넘음 → 우리도 5~8° 수준이 현실적인 기대치",
-        "한계: 책상에 가려지면 성능 하락, 체형·성별 차이 분석엔 표본 부족"] },
-  ];
-  const cw = 5.85, gap = 0.23, y0 = 1.85, h0 = 4.0;
-  papers.forEach((p, i) => {
-    const x = 0.7 + i * (cw + gap);
-    card(s, x, y0, cw, h0);
-    cardTitle(s, p.icon, x, y0, cw, p.title);
-    bullets(s, p.items, x + 0.3, y0 + 1.05, cw - 0.6, h0 - 1.2, 12.5);
-  });
-  card(s, 0.7, 6.0, 11.93, 0.8, TEAL_DARK);
-  s.addText("두 논문 모두 거리 고정·카메라 정면 설치였고, '거리에 불변'과 'IMU로 기울기 보정'은 검증하지 않음 → 이 두 가지는 우리가 직접 실험으로 보일 부분", {
-    x: 1.0, y: 6.0, w: 11.4, h: 0.8, valign: "middle", fontFace: FONT_BODY, fontSize: 12.5, bold: true, color: TXT_LIGHT, isTextBox: true, margin: 0,
-  });
-  pageNum(s, 12);
-}
-
-// =====================================================================================
-// 13. LIMITS & CAMERA-DAY
+// 12. LIMITS & CAMERA-DAY
 // =====================================================================================
 {
   const s = newSlide();
@@ -471,11 +439,11 @@ const W_OPT = { ...C_OPT, fill: { color: "FDEFE8" }, color: "9A3F1F", bold: true
     "새 참가자·다른 조명/복장으로 추가 수집",
     "반납 전 로그 커밋 — depth는 사후 복구 불가",
   ], 7.08, 2.9, 5.3, 3.7, 14);
-  pageNum(s, 13);
+  pageNum(s, 12);
 }
 
 // =====================================================================================
-// 14. WEEK 6 PLAN + CLOSE
+// 13. WEEK 6 PLAN + CLOSE
 // =====================================================================================
 {
   const s = newSlide();
@@ -490,7 +458,7 @@ const W_OPT = { ...C_OPT, fill: { color: "FDEFE8" }, color: "9A3F1F", bold: true
   s.addText("이상으로 5주차 발표를 마치겠습니다. 질문 받겠습니다.", {
     x: 0.7, y: 6.75, w: 11.93, h: 0.4, align: "center", fontFace: FONT_BODY, fontSize: 13, italic: true, color: TXT_MUTED, isTextBox: true, margin: 0,
   });
-  pageNum(s, 14);
+  pageNum(s, 13);
 }
 
 pres.writeFile({ fileName: "barunjase_week5.pptx" }).then(() => console.log("done"));
