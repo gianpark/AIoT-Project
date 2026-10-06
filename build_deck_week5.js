@@ -190,7 +190,7 @@ const W_OPT = { ...C_OPT, fill: { color: "FDEFE8" }, color: "9A3F1F", bold: true
   bullets(s, [
     "전체의 15%(36장)를 클래스 비율 유지로 추출, 파일명 숨겨 블라인드 폴더 생성",
     "촬영 안 한 팀원이 독립 라벨링 → 일치율·혼동 쌍 자동 계산",
-    "결과: 불일치 2건(slouch_back→tilt_left), 기준(20% 미만) 통과",
+    "결과: 불일치 2건은 고개만 기운 사진 → \"tilt는 몸통 기울임만\"으로 정의 확정",
   ], 7.6, 2.8, 4.8, 1.75, 11.5);
   noteTag(s, 7.6, 4.2, "일치율 94.4% (34/36) — 기준 통과", "good");
 
@@ -277,7 +277,7 @@ const W_OPT = { ...C_OPT, fill: { color: "FDEFE8" }, color: "9A3F1F", bold: true
     [{ text: "판정", options: H_OPT }, { text: "잠정 임계값", options: H_OPT }, { text: "근거 (실측 중앙값)", options: H_OPT }],
     [{ text: "화면 근접", options: C_OPT }, { text: "머리·가슴 depth < 0.40m", options: C_OPT }, { text: "정상 머리 ≥ 0.44m, 숙임 0.34~0.39m", options: C_OPT }],
     [{ text: "앞숙임 / 뒤기댐", options: C_OPT }, { text: "엉덩이−가슴 depth 차 > +0.10m / < −0.10m", options: C_OPT }, { text: "정상 −0.05, 숙임 +0.17, 기댐 −0.16", options: C_OPT }],
-    [{ text: "좌우 기울임", options: C_OPT }, { text: "코 좌우 치우침 > 어깨너비 0.35배", options: C_OPT }, { text: "미검증 (keypoint만 사용)", options: W_OPT }],
+    [{ text: "좌우 기울임", options: C_OPT }, { text: "어깨 중점 좌우 치우침 > 어깨너비 0.35배", options: C_OPT }, { text: "미검증 (keypoint만 사용)", options: W_OPT }],
     [{ text: "주의 단계", options: C_OPT }, { text: "경고 임계값의 70% 이상", options: C_OPT }, { text: "—", options: C_OPT }],
   ];
   s.addTable(rows, { x: 0.7, y: 2.3, w: 7.7, colW: [1.9, 3.3, 2.5], rowH: 0.62, border: { type: "solid", color: "0B1A26", pt: 1.5 }, autoPage: false });

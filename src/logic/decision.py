@@ -27,7 +27,7 @@ NORMAL, CAUTION, WARNING = "정상", "주의", "경고"
 # --- 잠정 임계값 (6주차 확정 예정) ---
 PROXIMITY_DEPTH_M = 0.40  # 머리/가슴이 이 거리보다 가까우면 "화면 근접" (실측: 정상 머리 ≥0.44m, 숙임 0.34~0.39m)
 RECLINE_WARN_M = 0.10  # torso_recline_offset_m: +면 숙임(엉덩이가 가슴보다 멀다), -면 기댐 (정상 -0.05, 숙임 +0.17, 기댐 -0.16)
-LATERAL_WARN = 0.35  # 코가 엉덩이 중심에서 옆으로 벗어난 정도(어깨너비 단위)
+LATERAL_WARN = 0.35  # 어깨 중점이 엉덩이 중점에서 옆으로 벗어난 정도(어깨너비 단위) — 몸통 약 15° 기울임에 해당하는 잠정값
 CAUTION_RATIO = 0.7  # 경고 임계값의 70%부터 "주의"
 
 
@@ -82,11 +82,16 @@ class Judgement:
 
 
 def lateral_offset(keypoints) -> Optional[float]:
-    """코의 좌우 치우침(어깨너비 단위). 음수 = 화면 왼쪽 = 참가자 본인 기준 오른쪽(비반전 영상)."""
-    norm = normalize_keypoints(keypoints)
+    """몸통의 좌우 기울기(어깨너비 단위): 엉덩이 중점 대비 어깨 중점의 가로 치우침.
+    음수 = 화면 왼쪽 = 참가자 본인 기준 오른쪽(비반전 영상).
+
+    클래스 정의(10/6 결정): tilt는 **몸통 기울임만** 뜻한다. 코(머리) 위치는 쓰지 않으므로
+    고개만 옆으로 기울인 경우는 기울임으로 판정하지 않는다(블라인드 라벨링 불일치 rl_035 계기).
+    """
+    norm = normalize_keypoints(keypoints)  # 원점 = 엉덩이 중점
     if norm is None:
         return None
-    return float(norm[0][0] - (norm[11][0] + norm[12][0]) / 2.0)
+    return float((norm[5][0] + norm[6][0]) / 2.0)
 
 
 def judge(keypoints, depth_features: Optional[dict],

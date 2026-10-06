@@ -2,8 +2,10 @@ from src.logic.decision import (CAUTION, NORMAL, WARNING, AlertStateMachine, Jud
 from src.pose.movenet_keypoints import Keypoint
 
 
-def kps(nose_x=0.5):
-    base = {5: (0.42, 0.40), 6: (0.58, 0.40), 11: (0.44, 0.65), 12: (0.56, 0.65), 0: (nose_x, 0.28)}
+def kps(nose_x=0.5, shoulder_dx=0.0):
+    """shoulder_dx: 어깨를 화면 가로로 밀어 몸통을 기울인 정도(화면 비율). 코는 nose_x로 따로 움직임."""
+    base = {5: (0.42 + shoulder_dx, 0.40), 6: (0.58 + shoulder_dx, 0.40), 11: (0.44, 0.65), 12: (0.56, 0.65),
+            0: (nose_x, 0.28)}
     return [Keypoint(name=f"k{i}", y=base.get(i, (0.5, 0.5))[1], x=base.get(i, (0.5, 0.5))[0], score=0.9)
             for i in range(17)]
 
@@ -30,9 +32,15 @@ def test_slouch_back_warning():
 
 def test_tilt_direction_uses_participant_side():
     # 이미지 왼쪽(x 작음) = 참가자 본인 기준 오른쪽
-    left_img = judge(kps(nose_x=0.30), depth())
-    right_img = judge(kps(nose_x=0.70), depth())
+    left_img = judge(kps(shoulder_dx=-0.10), depth())
+    right_img = judge(kps(shoulder_dx=0.10), depth())
     assert left_img.posture_kind == "tilt_right" and right_img.posture_kind == "tilt_left"
+
+
+def test_head_only_tilt_is_not_a_tilt():
+    """고개만 옆으로 기울이고 몸통이 곧으면 기울임이 아니다(클래스 정의: 몸통 기울임만 tilt)."""
+    j = judge(kps(nose_x=0.75), depth())
+    assert j.posture_level == NORMAL and j.posture_kind is None
 
 
 def test_caution_between_thresholds():
