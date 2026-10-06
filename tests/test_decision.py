@@ -101,3 +101,17 @@ def test_proximity_without_hip_depth_is_forward_lean():
     j = judge(kps(), {"head_depth_m": 0.35, "chest_depth_m": 0.5, "hip_depth_m": None,
                       "torso_recline_offset_m": None})
     assert j.proximity and j.posture_kind == "slouch_forward" and j.posture_level == WARNING
+
+
+def test_back_lean_detected_from_neck_offset_without_hip():
+    """10/6 로그 값: 정상 nf 0.153 → 정상, 기댐 nf 0.062 → 경고, 허리 depth 없어도."""
+    base = {"head_depth_m": 0.74, "chest_depth_m": 0.80, "hip_depth_m": None, "torso_recline_offset_m": None}
+    normal = judge(kps(), {**base, "neck_forward_offset_m": 0.153})
+    back = judge(kps(), {**base, "neck_forward_offset_m": 0.062})
+    assert normal.posture_kind is None
+    assert back.posture_level == WARNING and back.posture_kind == "slouch_back"
+
+
+def test_logged_recline_values():
+    assert judge(kps(), depth(recline=0.054)).posture_kind is None
+    assert judge(kps(), depth(recline=-0.117)).posture_kind == "slouch_back"
