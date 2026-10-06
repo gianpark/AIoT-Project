@@ -89,3 +89,9 @@ def test_fallback_depth_triggers_proximity_only_when_depth_missing():
 def test_back_threshold_matches_field_value():
     j = judge(kps(), depth(head=0.8, chest=0.8, recline=-0.15))
     assert j.posture_level == WARNING and j.posture_kind == "slouch_back"
+
+
+def test_near_invalid_face_counts_as_forward_and_proximity():
+    j = judge(kps(), {"head_depth_m": None, "chest_depth_m": None, "hip_depth_m": None,
+                      "torso_recline_offset_m": None, "near_invalid": True})
+    assert j.proximity and j.posture_level == WARNING and j.posture_kind == "slouch_forward"

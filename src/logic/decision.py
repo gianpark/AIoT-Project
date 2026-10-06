@@ -114,7 +114,15 @@ def judge(keypoints, depth_features: Optional[dict],
         proximity = True
         reasons.append(f"근접(어깨너비 추정) {fallback_depth_m:.2f}m < {PROXIMITY_DEPTH_M:.2f}m")
 
+    near_invalid = bool(d.get("near_invalid"))
+    if near_invalid and not proximity:
+        proximity = True
+        reasons.append("근접(얼굴 depth 무효: 최소 유효거리 안쪽)")
+
     recline = d.get("torso_recline_offset_m")
+    if recline is None and near_invalid:
+        # 앞으로 크게 숙여 얼굴·가슴이 D455 최소 거리 안으로 들어오면 depth 차이를 못 재므로 앞숙임으로 본다.
+        ratios["slouch_forward"] = 1.0
     if recline is not None:
         if recline > 0:
             ratios["slouch_forward"] = recline / RECLINE_WARN_M

@@ -855,6 +855,12 @@ def main():
                         cv2.putText(frame, text, (10, y0), cv2.FONT_HERSHEY_SIMPLEX,
                                     0.5, (170, 220, 255), 1, cv2.LINE_AA)
                         y0 += 20
+                # 진단용: 코/어깨/엉덩이 confidence와 근접 무효 플래그 (앞숙임 때 어디서 끊기는지 확인)
+                sc = lambda i: keypoints[i].score
+                dbg = (f"score nose {sc(0):.2f} sh {min(sc(5), sc(6)):.2f} hip {min(sc(11), sc(12)):.2f}"
+                       f" near_invalid {int(bool(depth_features and depth_features.get('near_invalid')))}")
+                cv2.putText(frame, dbg, (10, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (170, 220, 255), 1, cv2.LINE_AA)
+                y0 += 20
 
             if alert_machine is not None and not (auto_calibrate and not calibrated):
                 sh_w = shoulder_width_ratio(keypoints, raw_frame.shape)

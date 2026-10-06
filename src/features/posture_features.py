@@ -134,7 +134,11 @@ def compute_depth_features(
     chest_depth = _midpoint_depth(l_sh, r_sh)
     hip_depth = _midpoint_depth(l_hip, r_hip)
 
-    if head_depth is None and chest_depth is None and hip_depth is None:
+    # 코 confidence는 충분한데 머리 depth만 없으면 얼굴이 D455 최소 유효거리 안쪽(<~0.3m)이라는 뜻이다.
+    # (먼 쪽 무효는 전경 마스크/범위 필터에서 걸러지므로 가장 가까운 코가 무효 = 너무 가까움으로 본다.)
+    near_invalid = nose.score >= confidence_threshold and head_depth is None
+
+    if head_depth is None and chest_depth is None and hip_depth is None and not near_invalid:
         return None
 
     # 앞으로 크게 숙이면 어깨(가슴)가 D455 최소 유효거리 안쪽으로 들어와 depth가 무효(None)가 된다.
@@ -153,4 +157,5 @@ def compute_depth_features(
             (chest_depth - head_depth) if head_depth is not None and chest_depth is not None else None
         ),
         "torso_recline_offset_m": recline,
+        "near_invalid": near_invalid,
     }
