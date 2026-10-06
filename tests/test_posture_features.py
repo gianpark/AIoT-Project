@@ -176,3 +176,11 @@ def test_depth_features_chest_near_invalid_gives_forward_lower_bound():
     f = compute_depth_features(kps, lambda x, y: None if y < 0.5 else 0.8)
     assert f["chest_depth_m"] is None
     assert f["torso_recline_offset_m"] == pytest.approx(0.8 - 0.30)
+
+
+def test_hip_depth_ignored_when_hip_occluded_by_desk():
+    kps = [FakeKeypoint(f"k{i}", 0.5, 0.5, 0.9) for i in range(17)]
+    kps[11] = FakeKeypoint("lh", 0.8, 0.45, 0.4)
+    kps[12] = FakeKeypoint("rh", 0.8, 0.55, 0.4)
+    f = compute_depth_features(kps, lambda x, y: 0.5 if y > 0.7 else 0.7)
+    assert f["hip_depth_m"] is None and f["torso_recline_offset_m"] is None

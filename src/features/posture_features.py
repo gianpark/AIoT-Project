@@ -90,6 +90,9 @@ def compute_posture_features(keypoints: list["Keypoint"]) -> Optional[dict]:
 DepthLookup = Callable[[float, float], Optional[float]]
 
 
+# 책상이 허리를 가리면 MoveNet이 엉덩이를 책상 위치에 '추측'해 찍고, 거기 depth는 책상(몸보다 가까움)이라
+# 뒤로 기댐(-)으로 오판한다(6주차 실측). 허리 depth는 엉덩이 confidence가 이 값 이상일 때만 신뢰한다.
+HIP_DEPTH_MIN_SCORE = 0.5
 NEAR_INVALID_DEPTH_M = 0.30  # 이보다 가까우면 D455 depth가 무효로 읽힘(MIN_VALID_DEPTH_M과 동일)
 
 
@@ -97,6 +100,7 @@ def compute_depth_features(
     keypoints: list["Keypoint"],
     depth_lookup: DepthLookup,
     confidence_threshold: float = 0.3,
+    hip_confidence_threshold: float = HIP_DEPTH_MIN_SCORE,
 ) -> Optional[dict]:
     """
     5주차: 판정 로직과 스테레오+포즈 파이프라인 1차 통합용 — 머리(코)/가슴(양쪽 어깨
@@ -125,14 +129,14 @@ def compute_depth_features(
             return None
         return depth_lookup(kp.x, kp.y)
 
-    def _midpoint_depth(a: "Keypoint", b: "Keypoint") -> Optional[float]:
-        if a.score < confidence_threshold or b.score < confidence_threshold:
+    def _midpoint_depth(a: "Keypoint", b: "Keypoint", min_score: float = confidence_threshold) -> Optional[float]:
+        if a.score < min_score or b.score < min_score:
             return None
         return depth_lookup((a.x + b.x) / 2.0, (a.y + b.y) / 2.0)
 
     head_depth = _point_depth(nose)
     chest_depth = _midpoint_depth(l_sh, r_sh)
-    hip_depth = _midpoint_depth(l_hip, r_hip)
+    hip_depth = _midpoint_depth(l_hip, r_hip, hip_confidence_threshold)
 
     # 코 confidence는 충분한데 머리 depth만 없으면 얼굴이 D455 최소 유효거리 안쪽(<~0.3m)이라는 뜻이다.
     # (먼 쪽 무효는 전경 마스크/범위 필터에서 걸러지므로 가장 가까운 코가 무효 = 너무 가까움으로 본다.)
