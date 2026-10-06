@@ -26,7 +26,7 @@ def test_forward_slouch_and_proximity():
 
 
 def test_slouch_back_warning():
-    j = judge(kps(), depth(head=0.79, chest=0.82, recline=-0.16))
+    j = judge(kps(), depth(head=0.79, chest=0.82, recline=-0.30))
     assert j.posture_level == WARNING and j.posture_kind == "slouch_back"
 
 

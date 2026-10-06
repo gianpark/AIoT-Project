@@ -385,7 +385,9 @@ class _RealSenseSource:
         self._RealSenseCamera = RealSenseCamera
         self._min_valid = MIN_VALID_DEPTH_M
         self._max_valid = MAX_VALID_DEPTH_M
-        self._cam = RealSenseCamera(fps=fps).start()
+        # hole filling을 '가장 가까운 값'(mode 2)으로: SDK 기본(1, 먼 값)은 근접 무효 영역을 배경 depth로 채워
+        # 전경 마스크가 얼굴을 지워버린다(실측).
+        self._cam = RealSenseCamera(fps=fps, hole_filling_mode=2).start()
         self._last_depth_frame = None
 
     def read(self):
@@ -498,7 +500,7 @@ def _estimate_subject_bounds(keypoints: list[Keypoint], frame_shape, depth_looku
             if d is not None:
                 depths.append(d)
         if depths:
-            depth_range = (max(0.05, min(depths) - 0.35), max(depths) + 0.35)
+            depth_range = (max(0.05, min(depths) - 0.5), max(depths) + 0.35)
 
     return {"roi_rect": (x_px, y_px, w_box, h_box), "depth_range": depth_range}
 
@@ -610,8 +612,8 @@ def main():
                          help="캡처 모드에서 이미지를 저장할 루트 폴더 (기본 data/raw, 참가자별 하위 폴더 자동 생성)")
     parser.add_argument("--hip-warn-threshold", type=float, default=0.3,
                          help="저장 시 hip keypoint confidence가 이 값 미만이면 경고 표시 (팔로 가려짐 등 감지용)")
-    parser.add_argument("--subject-min-depth", type=float, default=0.3,
-                         help="--realsense에서 전경 분리 시 유효 거리 하한(m), 기본 0.3")
+    parser.add_argument("--subject-min-depth", type=float, default=0.05,
+                         help="--realsense에서 전경 분리 시 유효 거리 하한(m), 기본 0.05")
     parser.add_argument("--subject-max-depth", type=float, default=1.0,
                          help="--realsense에서 전경 분리 시 유효 거리 상한(m), 기본 1.0 "
                               "(책상 앞 촬영 대상의 가슴/허리 실측 깊이가 보통 0.6~0.85m인 점을 "
@@ -793,7 +795,7 @@ def main():
                                 int(sum(ws) / len(ws)), int(sum(hs) / len(hs)))
                     depth_ranges = [b["depth_range"] for b in calibration_buffer if b["depth_range"] is not None]
                     if depth_ranges:
-                        # 자동 계산값이라도 --subject-min-depth/--subject-max-depth(기본 0.3~1.0m)
+                        # 자동 계산값이라도 --subject-min-depth/--subject-max-depth(기본 0.05~1.0m)
                         # 범위를 벗어나 더 느슨해지지는 않게 한다 — 예: 1m보다 먼 건 항상 지워짐.
                         subject_min_depth = max(args.subject_min_depth, min(d[0] for d in depth_ranges))
                         subject_max_depth = min(args.subject_max_depth, max(d[1] for d in depth_ranges))

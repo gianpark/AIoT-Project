@@ -26,6 +26,7 @@ NORMAL, CAUTION, WARNING = "정상", "주의", "경고"
 
 # --- 잠정 임계값 (6주차 확정 예정) ---
 PROXIMITY_DEPTH_M = 0.40  # 머리/가슴이 이 거리보다 가까우면 "화면 근접" (실측: 정상 머리 ≥0.44m, 숙임 0.34~0.39m)
+RECLINE_BACK_WARN_M = 0.25  # 기댐은 실측(6주차 카메라 수령 후)에서 정상 자세도 -값이 나와 임시로 크게 잡음. 허리 keypoint가 책상/의자 depth를 집을 수 있어 로그로 재보정 예정
 RECLINE_WARN_M = 0.10  # torso_recline_offset_m: +면 숙임(엉덩이가 가슴보다 멀다), -면 기댐 (정상 -0.05, 숙임 +0.17, 기댐 -0.16)
 LATERAL_WARN = 0.35  # 어깨 중점이 엉덩이 중점에서 옆으로 벗어난 정도(어깨너비 단위) — 몸통 약 15° 기울임에 해당하는 잠정값
 CAUTION_RATIO = 0.7  # 경고 임계값의 70%부터 "주의"
@@ -118,7 +119,7 @@ def judge(keypoints, depth_features: Optional[dict],
         if recline > 0:
             ratios["slouch_forward"] = recline / RECLINE_WARN_M
         else:
-            ratios["slouch_back"] = -recline / RECLINE_WARN_M
+            ratios["slouch_back"] = -recline / RECLINE_BACK_WARN_M
 
     lat = lateral_offset(keypoints)
     if lat is not None:
