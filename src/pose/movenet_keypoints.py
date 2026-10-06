@@ -748,6 +748,7 @@ def main():
     alert_machine = AlertStateMachine() if args.judge else None
     proximity_estimator = ProximityEstimator()
     last_sample_t = None
+    judge_start_t = time.time()  # [알림] 출력에 경과 초를 붙여 쿨다운(60s/300s)을 로그만으로 확인
 
     print(f"실행 중 (소스: {'RealSense D455' if args.realsense else f'웹캠 index={args.camera}'})... 'q'를 누르면 종료합니다.")
     try:
@@ -880,7 +881,7 @@ def main():
                 if last_sample_t is None or now - last_sample_t >= args.sample_interval:
                     last_sample_t = now
                     for alert in alert_machine.update(now, judgement):
-                        print(f"[알림] {alert} — {', '.join(judgement.reasons)}")
+                        print(f"[알림 +{now - judge_start_t:6.1f}s] {alert} — {', '.join(judgement.reasons)}")
 
             if log_writer:
                 row = [time.time()] + [f"{kp.score:.4f}" for kp in keypoints_raw]
