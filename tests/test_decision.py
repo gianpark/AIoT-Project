@@ -59,3 +59,20 @@ def test_streak_resets_on_normal_and_proximity_cooldown():
     p = Judgement(NORMAL, None, True)
     assert sm.update(20, p) == ["proximity"] and sm.update(30, p) == []
     assert sm.update(80, p) == ["proximity"]
+
+
+def test_proximity_estimator_recovers_depth_from_shoulder_width():
+    from src.logic.decision import ProximityEstimator
+    est = ProximityEstimator(min_samples=3)
+    assert est.estimate_depth(0.3) is None  # 아직 보정 전
+    for z in (0.6, 0.7, 0.8, 0.65):
+        est.update(0.12 / z, z)  # w = 0.12 / Z
+    assert est.calibrated
+    assert abs(est.estimate_depth(0.12 / 0.3) - 0.3) < 0.02
+
+
+def test_fallback_depth_triggers_proximity_only_when_depth_missing():
+    near_missing = judge(kps(), {"head_depth_m": None, "chest_depth_m": None}, fallback_depth_m=0.30)
+    assert near_missing.proximity
+    valid_far = judge(kps(), depth(), fallback_depth_m=0.30)  # depth가 유효하면 depth 우선
+    assert not valid_far.proximity

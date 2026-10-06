@@ -14,6 +14,7 @@ project.md 3장/2절 결정 로그 기준:
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -28,6 +29,43 @@ PROXIMITY_DEPTH_M = 0.40  # 머리/가슴이 이 거리보다 가까우면 "화�
 RECLINE_WARN_M = 0.10  # torso_recline_offset_m: +면 숙임(엉덩이가 가슴보다 멀다), -면 기댐 (정상 -0.05, 숙임 +0.17, 기댐 -0.16)
 LATERAL_WARN = 0.35  # 코가 엉덩이 중심에서 옆으로 벗어난 정도(어깨너비 단위)
 CAUTION_RATIO = 0.7  # 경고 임계값의 70%부터 "주의"
+
+
+class ProximityEstimator:
+    """depth가 무효인 근접 구간(~40cm 미만)용 보완 — RGB 어깨너비로 거리를 추정한다.
+
+    핀홀 모델에서 화면 속 어깨너비(w)는 거리(Z)에 반비례하므로 w * Z ≈ k(상수, 사용자·카메라
+    마다 다름)다. depth가 유효한 프레임마다 k를 갱신(이동 중앙값)해두면, depth가 무효인 프레임에서
+    Z ≈ k / w 로 거리를 역산할 수 있다 — 별도 수동 보정 없이 사용 중 자동으로 맞춰진다.
+    (project.md 6장 4주차 발견: depth 사각지대와 "화면에 너무 가까워짐" 감지가 겹침)
+    """
+
+    def __init__(self, window: int = 60, min_samples: int = 10):
+        self._ks: deque[float] = deque(maxlen=window)
+        self.min_samples = min_samples
+
+    def update(self, shoulder_width: Optional[float], depth_m: Optional[float]) -> None:
+        """depth가 유효한 프레임에서 k = w*Z를 기록한다."""
+        if shoulder_width and depth_m and shoulder_width > 1e-3 and depth_m > 0:
+            self._ks.append(shoulder_width * depth_m)
+
+    @property
+    def calibrated(self) -> bool:
+        return len(self._ks) >= self.min_samples
+
+    def estimate_depth(self, shoulder_width: Optional[float]) -> Optional[float]:
+        if not self.calibrated or not shoulder_width or shoulder_width <= 1e-3:
+            return None
+        return float(np.median(self._ks)) / shoulder_width
+
+
+def shoulder_width_ratio(keypoints, frame_shape, min_score: float = 0.3) -> Optional[float]:
+    """화면 너비 대비 어깨너비(두 어깨 픽셀 거리 / 프레임 너비). 어깨가 안 잡히면 None."""
+    l_sh, r_sh = keypoints[5], keypoints[6]
+    if l_sh.score < min_score or r_sh.score < min_score:
+        return None
+    h, w = frame_shape[:2]
+    return float(np.hypot((l_sh.x - r_sh.x) * w, (l_sh.y - r_sh.y) * h) / w)
 
 
 @dataclass
@@ -51,8 +89,13 @@ def lateral_offset(keypoints) -> Optional[float]:
     return float(norm[0][0] - (norm[11][0] + norm[12][0]) / 2.0)
 
 
-def judge(keypoints, depth_features: Optional[dict]) -> Judgement:
-    """한 샘플의 keypoint + depth 특징으로 자세·근접을 판정한다."""
+def judge(keypoints, depth_features: Optional[dict],
+          fallback_depth_m: Optional[float] = None) -> Judgement:
+    """한 샘플의 keypoint + depth 특징으로 자세·근접을 판정한다.
+
+    fallback_depth_m: depth가 무효일 때 ProximityEstimator가 RGB 어깨너비로 추정한 거리(m).
+    머리·가슴 depth가 둘 다 없을 때만 근접 판정에 쓴다.
+    """
     reasons: list[str] = []
     ratios: dict[str, float] = {}  # kind -> 경고 임계 대비 비율
 
@@ -61,6 +104,9 @@ def judge(keypoints, depth_features: Optional[dict]) -> Judgement:
     proximity = bool(near) and min(near) < PROXIMITY_DEPTH_M
     if proximity:
         reasons.append(f"근접 {min(near):.2f}m < {PROXIMITY_DEPTH_M:.2f}m")
+    elif not near and fallback_depth_m is not None and fallback_depth_m < PROXIMITY_DEPTH_M:
+        proximity = True
+        reasons.append(f"근접(어깨너비 추정) {fallback_depth_m:.2f}m < {PROXIMITY_DEPTH_M:.2f}m")
 
     recline = d.get("torso_recline_offset_m")
     if recline is not None:

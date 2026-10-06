@@ -84,7 +84,8 @@ except ImportError as exc:  # pragma: no cover
     ) from exc
 
 from src.features.posture_features import compute_depth_features, compute_posture_features
-from src.logic.decision import CAUTION, NORMAL, WARNING, AlertStateMachine, judge
+from src.logic.decision import (CAUTION, NORMAL, WARNING, AlertStateMachine, ProximityEstimator, judge,
+                                shoulder_width_ratio)
 
 DEPTH_FEATURE_KEYS = [
     "head_depth_m", "chest_depth_m", "hip_depth_m",
@@ -424,7 +425,10 @@ class _RealSenseSource:
         if depth_frame is None:
             return None
         depth_m = self._cam.get_depth_image_m(depth_frame)
-        return (depth_m >= min_depth_m) & (depth_m <= max_depth_m)
+        # depth가 0(무효)인 픽셀은 지우지 않는다 — D455는 약 40cm 미만 근접에서 depth가 무효가 되는데,
+        # 이걸 "범위 밖"으로 지우면 화면에 너무 가까워진 사용자가 통째로 사라져 근접 감지 자체가
+        # 불가능해진다. 먼 곳의 다른 사람은 유효한 depth를 가져 여전히 범위 밖으로 지워진다.
+        return ((depth_m >= min_depth_m) & (depth_m <= max_depth_m)) | (depth_m <= 0)
 
     def release(self) -> None:
         self._cam.stop()
@@ -735,6 +739,7 @@ def main():
               f"(여러 명이 잡혀도 그 범위 안 사람만 인식 — 끄려면 --no-subject-isolation)")
 
     alert_machine = AlertStateMachine() if args.judge else None
+    proximity_estimator = ProximityEstimator()
     last_sample_t = None
 
     print(f"실행 중 (소스: {'RealSense D455' if args.realsense else f'웹캠 index={args.camera}'})... 'q'를 누르면 종료합니다.")
@@ -845,7 +850,14 @@ def main():
                         y0 += 20
 
             if alert_machine is not None and not (auto_calibrate and not calibrated):
-                judgement = judge(keypoints, depth_features)
+                sh_w = shoulder_width_ratio(keypoints, raw_frame.shape)
+                ref_depth = None
+                if depth_features:
+                    valid = [v for v in (depth_features.get("chest_depth_m"), depth_features.get("head_depth_m")) if v]
+                    ref_depth = depth_features.get("chest_depth_m") or (valid[0] if valid else None)
+                proximity_estimator.update(sh_w, ref_depth)  # depth 유효 시 k=어깨너비*거리 학습
+                judgement = judge(keypoints, depth_features,
+                                  fallback_depth_m=proximity_estimator.estimate_depth(sh_w))
                 color = {NORMAL: (0, 255, 170), CAUTION: (0, 200, 255), WARNING: (0, 0, 255)}[judgement.posture_level]
                 kind = f" ({judgement.posture_kind})" if judgement.posture_kind else ""
                 near = "  [화면 근접]" if judgement.proximity else ""
