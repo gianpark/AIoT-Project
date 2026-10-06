@@ -190,9 +190,9 @@ const W_OPT = { ...C_OPT, fill: { color: "FDEFE8" }, color: "9A3F1F", bold: true
   bullets(s, [
     "전체의 15%(36장)를 클래스 비율 유지로 추출, 파일명 숨겨 블라인드 폴더 생성",
     "촬영 안 한 팀원이 독립 라벨링 → 일치율·혼동 쌍 자동 계산",
-    "프로토콜: 불일치 20% 이상이면 클래스 정의 재논의",
+    "결과: 불일치 2건(slouch_back→tilt_left), 기준(20% 미만) 통과",
   ], 7.6, 2.8, 4.8, 1.75, 11.5);
-  noteTag(s, 7.6, 4.2, "팀원 라벨링 결과 대기 중", "warn");
+  noteTag(s, 7.6, 4.2, "일치율 94.4% (34/36) — 기준 통과", "good");
 
   card(s, 7.3, 4.8, 5.33, 1.8, WARN_SOFT);
   s.addText("한계", { x: 7.6, y: 4.92, w: 4.8, h: 0.3, fontFace: FONT_BODY, fontSize: 11, bold: true, color: WARN, isTextBox: true, margin: 0 });
