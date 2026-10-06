@@ -27,6 +27,7 @@ data/external_wrf/
 !data/capture_features_log.csv
 !data/relabel_mapping.csv
 !data/relabel_results.csv
+!data/depth_filter_tuning.csv
 
 # 발표자료 QA용으로 렌더링한 슬라이드 이미지 (pptx에서 다시 뽑으면 됨)
 slide-*.jpg

@@ -37,6 +37,9 @@
     # 5주차: 필터 파라미터를 바꿔가며 같은 방식으로 비교 (기본값 대비 스무딩을 더 강하게)
     python -m src.capture.realsense_capture view --log data/distance_accuracy_log.csv --spatial-alpha 0.7 --temporal-alpha 0.6
 
+    # 5주차: depth 필터 프리셋(필터없음/SDK기본/강/약...) 자동 비교 — 평소 작업 거리에서 가만히 앉아서
+    python -m src.capture.realsense_capture filters --out data/depth_filter_tuning.csv --note "60cm 정면"
+
     # 30초 동안 fps/프레임타임 스파이크 자동 측정
     python -m src.capture.realsense_capture gate --seconds 30
 """
@@ -82,7 +85,9 @@ class RealSenseCamera:
                  fps: int = DEFAULT_FPS, use_filters: bool = True,
                  spatial_alpha: float | None = None, spatial_delta: float | None = None,
                  spatial_magnitude: float | None = None,
-                 temporal_alpha: float | None = None, temporal_delta: float | None = None):
+                 temporal_alpha: float | None = None, temporal_delta: float | None = None,
+                 use_spatial: bool = True, use_temporal: bool = True, use_hole_filling: bool = True,
+                 hole_filling_mode: int | None = None):
         """
         spatial_*/temporal_* — 5주차 필터 튜닝용 오버라이드. None이면 RealSense SDK
         기본값을 그대로 쓴다. 의미(공식 SDK 옵션):
@@ -105,8 +110,25 @@ class RealSenseCamera:
         # depth를 color 시점으로 정렬 - 같은 픽셀 좌표로 색상/깊이를 함께 참조하기 위함
         self._align = rs.align(rs.stream.color)
 
-        # project.md 6장 "5주차: RealSense depth 프리셋·필터 튜닝"에서 다듬는 필터들.
-        # CLI(--spatial-alpha 등)로 넘어온 값이 있으면 SDK 기본값 대신 그 값을 쓴다.
+        self.configure_filters(
+            use_spatial=use_spatial, use_temporal=use_temporal, use_hole_filling=use_hole_filling,
+            spatial_alpha=spatial_alpha, spatial_delta=spatial_delta, spatial_magnitude=spatial_magnitude,
+            temporal_alpha=temporal_alpha, temporal_delta=temporal_delta, hole_filling_mode=hole_filling_mode,
+        )
+
+        self._profile = None
+
+    def configure_filters(self, use_spatial: bool = True, use_temporal: bool = True,
+                          use_hole_filling: bool = True,
+                          spatial_alpha: float | None = None, spatial_delta: float | None = None,
+                          spatial_magnitude: float | None = None,
+                          temporal_alpha: float | None = None, temporal_delta: float | None = None,
+                          hole_filling_mode: int | None = None) -> None:
+        """필터를 (재)구성한다 — 새 필터 객체를 만들므로 temporal filter의 누적 상태도 초기화된다.
+        `filters` 모드가 카메라를 다시 켜지 않고 프리셋을 갈아끼울 때 쓴다.
+        hole_filling_mode: 0=왼쪽 값으로 채움, 1=최근접(far) 값, 2=최근접(near) 값 (SDK 기본 1).
+        """
+        self.use_spatial, self.use_temporal, self.use_hole_filling = use_spatial, use_temporal, use_hole_filling
         self._spatial = rs.spatial_filter()
         if spatial_alpha is not None:
             self._spatial.set_option(rs.option.filter_smooth_alpha, spatial_alpha)
@@ -122,8 +144,8 @@ class RealSenseCamera:
             self._temporal.set_option(rs.option.filter_smooth_delta, temporal_delta)
 
         self._hole_filling = rs.hole_filling_filter()
-
-        self._profile = None
+        if hole_filling_mode is not None:
+            self._hole_filling.set_option(rs.option.holes_fill, hole_filling_mode)
 
     def start(self) -> "RealSenseCamera":
         try:
@@ -168,9 +190,12 @@ class RealSenseCamera:
             return None
 
         if self.use_filters:
-            depth_frame = self._spatial.process(depth_frame)
-            depth_frame = self._temporal.process(depth_frame)
-            depth_frame = self._hole_filling.process(depth_frame)
+            if self.use_spatial:
+                depth_frame = self._spatial.process(depth_frame)
+            if self.use_temporal:
+                depth_frame = self._temporal.process(depth_frame)
+            if self.use_hole_filling:
+                depth_frame = self._hole_filling.process(depth_frame)
             depth_frame = depth_frame.as_depth_frame()
 
         color_image = np.asanyarray(color_frame.get_data())
@@ -328,6 +353,93 @@ def _gate_mode(args: argparse.Namespace) -> None:
         print("⚠ 목표 fps(5) 미달 - 해상도/fps 설정을 낮춰서(--fps 15 등) 재시도해볼 것")
 
 
+# `filters` 모드 프리셋: 이름 → configure_filters 인자 (None 값은 SDK 기본)
+FILTER_PRESETS: dict[str, dict] = {
+    "필터없음": dict(use_spatial=False, use_temporal=False, use_hole_filling=False),
+    "SDK기본": dict(),
+    "구멍메우기없음": dict(use_hole_filling=False),
+    "공간강": dict(spatial_alpha=0.7, spatial_delta=30, spatial_magnitude=3),
+    "시간강": dict(temporal_alpha=0.2, temporal_delta=40),
+    "시간약": dict(temporal_alpha=0.7, temporal_delta=15),
+    "강+구멍없음": dict(use_hole_filling=False, spatial_alpha=0.7, spatial_delta=30,
+                    spatial_magnitude=3, temporal_alpha=0.2, temporal_delta=40),
+}
+
+
+def _filters_mode(args: argparse.Namespace) -> None:
+    """
+    5주차 depth 필터 튜닝: 프리셋별로 같은 자리를 N초씩 찍어 떨림·구멍·튐·fps를 비교한다.
+    사용자는 평소 작업 거리에서 가만히 앉아 화면 중앙(십자선)에 가슴이 오도록 맞춘다.
+    (지표 정의는 src/capture/depth_filter_metrics.py 참고. 결과는 --out CSV로도 저장.)
+    """
+    import csv
+    from pathlib import Path
+
+    from src.capture.depth_filter_metrics import format_table, frame_stats, summarize
+
+    names = args.presets.split(",") if args.presets else list(FILTER_PRESETS)
+    unknown = [n for n in names if n not in FILTER_PRESETS]
+    if unknown:
+        raise SystemExit(f"알 수 없는 프리셋: {unknown} (가능: {list(FILTER_PRESETS)})")
+
+    rows: list[tuple[str, dict]] = []
+    with RealSenseCamera(fps=args.fps) as cam:
+        for name in names:
+            cam.configure_filters(**FILTER_PRESETS[name])
+            print(f"\n[{name}] 준비 — 화면 중앙 십자선에 가슴을 맞추고 가만히 있어주세요. "
+                  f"{args.warmup:.0f}초 워밍업 후 {args.seconds:.0f}초 측정 (q로 중단)")
+            stats = []
+            t0 = time.time()
+            measure_start = None
+            while True:
+                now = time.time()
+                if measure_start is None and now - t0 >= args.warmup:
+                    measure_start = now
+                if measure_start is not None and now - measure_start >= args.seconds:
+                    break
+                result = cam.read()
+                if result is None:
+                    continue
+                color_image, depth_frame, _ = result
+                depth_m = cam.get_depth_image_m(depth_frame)
+                if measure_start is not None:
+                    stats.append(frame_stats(depth_m, args.patch))
+                if args.show:
+                    h, w = color_image.shape[:2]
+                    half = args.patch // 2
+                    cv2.rectangle(color_image, (w // 2 - half, h // 2 - half), (w // 2 + half, h // 2 + half), (0, 255, 170), 2)
+                    label = f"{name} {'워밍업' if measure_start is None else '측정중'}"
+                    cv2.putText(color_image, label, (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+                    cv2.imshow("depth filter tuning (q to abort)", color_image)
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        raise SystemExit("중단했습니다.")
+            rows.append((name, summarize(stats, time.time() - measure_start)))
+    cv2.destroyAllWindows()
+
+    print("\n=== depth 필터 비교 결과 ===")
+    print(format_table(rows))
+    print("\n읽는 법: 시간떨림·표면노이즈·튐%는 낮을수록, 패치유효%는 높을수록, fps는 목표(8~10) 이상이면 OK.")
+    print("구멍메우기는 유효%를 올리지만 값을 지어내는 것이므로 떨림/튐과 같이 볼 것.")
+
+    if args.out:
+        out = Path(args.out)
+        is_new = not out.exists()
+        with open(out, "a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            if is_new:
+                w.writerow(["timestamp", "preset", "note", "frames", "fps", "patch_valid_pct", "frame_valid_pct",
+                            "median_depth_m", "temporal_std_mm", "spatial_std_mm", "spike_pct"])
+            for name, m in rows:
+                if m:
+                    w.writerow([time.time(), name, args.note, m["frames"], f"{m['fps']:.2f}",
+                                f"{m['patch_valid_pct']:.2f}", f"{m['frame_valid_pct']:.2f}",
+                                "" if m["median_depth_m"] is None else f"{m['median_depth_m']:.4f}",
+                                "" if m["temporal_std_mm"] is None else f"{m['temporal_std_mm']:.3f}",
+                                "" if m["spatial_std_mm"] is None else f"{m['spatial_std_mm']:.3f}",
+                                "" if m["spike_pct"] is None else f"{m['spike_pct']:.2f}"])
+        print(f"저장: {out}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="RealSense D455 캡처 / 4주차 게이트 측정")
     sub = parser.add_subparsers(dest="mode", required=True)
@@ -345,11 +457,23 @@ def main() -> None:
     gate_p.add_argument("--seconds", type=float, default=30.0)
     gate_p.add_argument("--fps", type=int, default=DEFAULT_FPS)
 
+    filt_p = sub.add_parser("filters", help="depth 필터 프리셋별 떨림·구멍·fps 비교 (5주차 필터 튜닝)")
+    filt_p.add_argument("--fps", type=int, default=DEFAULT_FPS)
+    filt_p.add_argument("--seconds", type=float, default=10.0, help="프리셋당 측정 시간(초)")
+    filt_p.add_argument("--warmup", type=float, default=2.0, help="프리셋 전환 후 temporal filter 안정화 대기(초)")
+    filt_p.add_argument("--patch", type=int, default=41, help="화면 중앙 관심 패치 한 변(px)")
+    filt_p.add_argument("--presets", type=str, default=None, help=f"쉼표로 구분한 프리셋 이름 (기본: 전부) — {', '.join(FILTER_PRESETS)}")
+    filt_p.add_argument("--out", type=str, default=None, help="결과를 누적할 CSV 경로 (예: data/depth_filter_tuning.csv)")
+    filt_p.add_argument("--note", type=str, default="", help="CSV에 남길 조건 메모 (예: '60cm 정면 형광등')")
+    filt_p.add_argument("--no-show", dest="show", action="store_false", help="화면 표시 없이 측정만")
+
     args = parser.parse_args()
     if args.mode == "view":
         _view_mode(args)
     elif args.mode == "gate":
         _gate_mode(args)
+    elif args.mode == "filters":
+        _filters_mode(args)
 
 
 if __name__ == "__main__":
