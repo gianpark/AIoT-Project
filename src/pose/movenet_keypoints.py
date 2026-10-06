@@ -84,6 +84,7 @@ except ImportError as exc:  # pragma: no cover
     ) from exc
 
 from src.features.posture_features import compute_depth_features, compute_posture_features
+from src.logic.decision import CAUTION, NORMAL, WARNING, AlertStateMachine, judge
 
 DEPTH_FEATURE_KEYS = [
     "head_depth_m", "chest_depth_m", "hip_depth_m",
@@ -626,6 +627,11 @@ def main():
     parser.add_argument("--no-track-subject", action="store_true",
                          help="최초 인식 후 사용자를 계속 따라가며 관심영역을 갱신하는 기능을 끈다 — "
                               "끄면 최초 인식 당시 위치에 영역이 고정된 채로 유지됨")
+    parser.add_argument("--judge", action="store_true",
+                         help="자세·거리 판정(정상/주의/경고 + 화면 근접)을 화면에 표시하고, 샘플 주기마다 알림 조건을 "
+                              "검사해 터미널에 출력한다 (5주차 판정 로직 1차 통합, src/logic/decision.py)")
+    parser.add_argument("--sample-interval", type=float, default=5.0,
+                         help="--judge에서 알림 상태머신에 샘플을 넣는 주기(초), 기본 5 (project.md 5초 샘플링)")
     args = parser.parse_args()
 
     if not Path(args.model).exists():
@@ -727,6 +733,9 @@ def main():
     elif subject_isolation:
         print(f"전경 분리 사용: {subject_min_depth:.2f}~{subject_max_depth:.2f}m 밖은 검게 지웁니다 "
               f"(여러 명이 잡혀도 그 범위 안 사람만 인식 — 끄려면 --no-subject-isolation)")
+
+    alert_machine = AlertStateMachine() if args.judge else None
+    last_sample_t = None
 
     print(f"실행 중 (소스: {'RealSense D455' if args.realsense else f'웹캠 index={args.camera}'})... 'q'를 누르면 종료합니다.")
     try:
@@ -834,6 +843,19 @@ def main():
                         cv2.putText(frame, text, (10, y0), cv2.FONT_HERSHEY_SIMPLEX,
                                     0.5, (170, 220, 255), 1, cv2.LINE_AA)
                         y0 += 20
+
+            if alert_machine is not None and not (auto_calibrate and not calibrated):
+                judgement = judge(keypoints, depth_features)
+                color = {NORMAL: (0, 255, 170), CAUTION: (0, 200, 255), WARNING: (0, 0, 255)}[judgement.posture_level]
+                kind = f" ({judgement.posture_kind})" if judgement.posture_kind else ""
+                near = "  [화면 근접]" if judgement.proximity else ""
+                cv2.putText(frame, f"{judgement.posture_level}{kind}{near}", (frame.shape[1] - 330, 28),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2, cv2.LINE_AA)
+                now = time.time()
+                if last_sample_t is None or now - last_sample_t >= args.sample_interval:
+                    last_sample_t = now
+                    for alert in alert_machine.update(now, judgement):
+                        print(f"[알림] {alert} — {', '.join(judgement.reasons)}")
 
             if log_writer:
                 row = [time.time()] + [f"{kp.score:.4f}" for kp in keypoints_raw]
