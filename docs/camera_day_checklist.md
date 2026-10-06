@@ -43,11 +43,11 @@ python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflit
 
 | 자세 | 기대 판정 | 확인 |
 |---|---|---|
-| 바른 자세 | 정상 | [ ] |
-| 앞으로 숙임 | 주의/경고 (slouch_forward) | [ ] |
-| 뒤로 기댐 | 주의/경고 (slouch_back) | [ ] |
-| 화면 오른쪽으로 기울임 | tilt_left (본인 기준 왼쪽) | [ ] |
-| 화면 왼쪽으로 기울임 | tilt_right (본인 기준 오른쪽) | [ ] |
+| 바른 자세 | 정상 | [x] 10/6 정상 유지 |
+| 앞으로 숙임 | 주의/경고 (slouch_forward) | [x] 10/6 `WARNING (slouch_forward) [NEAR]` (머리·가슴 depth 무효/근접 규칙) |
+| 뒤로 기댐 | 주의/경고 (slouch_back) | [x] 10/6 안정적으로 판정 (머리-가슴 depth 차 보조 신호 추가 후) |
+| 화면 오른쪽으로 기울임 | tilt_left (본인 기준 왼쪽) | [x] 10/6 정상 인식 |
+| 화면 왼쪽으로 기울임 | tilt_right (본인 기준 오른쪽) | [x] 10/6 정상 인식 |
 | 화면에 얼굴 가까이 (40cm 미만) | 근접 알림 1회 → 60초 쿨다운 | [ ] |
 | 자세 경고를 15초 이상 유지 | 연속 3회 후 자세 알림 1회 → 5분 쿨다운 | [ ] |
 
@@ -58,7 +58,21 @@ python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflit
 
 ## C. 임계값 메모 (5분)
 
-`src/logic/decision.py`의 잠정값(PROXIMITY_DEPTH_M 0.40, RECLINE_WARN_M 0.10, LATERAL_WARN 0.35)을 B 결과와 비교해 방향만 메모한다. 확정은 6주차(RULA 참고 + RF 결과)에 하므로 여기서는 바꾸지 않아도 된다.
+`src/logic/decision.py`의 잠정값을 B 결과와 비교해 방향만 메모한다. 확정은 6주차(RULA 참고 + RF 결과)에 하므로 여기서는 바꾸지 않아도 된다.
+
+**10/6 실측 반영 현황 (1인, 한 자세 15~40초 로그 `data/judge_*.csv`)**
+
+| 항목 | 이전 | 현재 | 근거 |
+|---|---|---|---|
+| PROXIMITY_DEPTH_M | 0.40 | 0.40 유지 | 정상 머리 0.43m, 앞숙임 머리 0.35m |
+| RECLINE_WARN_M (숙임) | 0.10 | 0.10 유지 | 정상 +0.054 (비율 0.54, 주의 0.7 미만) |
+| RECLINE_BACK_WARN_M (기댐) | 0.10(공용) | **0.11, 기댐 전용 분리** | 정상 +0.054, 살짝 -0.117, 심하게 -0.164 |
+| NECK_REF_M / NECK_BACK_WARN_M | — | **0.15 / 0.07 신규** | 머리-가슴 depth 차: 정상 0.153, 살짝 기댐 0.062, 심하게 ≈0 |
+| NECK_BACK_MIN_CHEST_M | — | **0.55 신규** | 앞숙임도 차가 0.062로 줄어 기댐과 겹침 → 가슴 ≥ 0.55m·근접 아님일 때만 기댐 신호 사용 |
+| HIP_DEPTH_MIN_SCORE | (0.3 공통) | **0.5** | 책상에 가려진 엉덩이 추측 위치가 책상 depth를 읽는 오염 방지 |
+| LATERAL_WARN | 0.35 | 0.35 유지(재검증 전) | 좌우 기울임 정상 인식 확인, 수치 미보정 |
+
+**한계 — 다음 실측에서 반드시 볼 것**: 위 값은 전부 1명·자세당 1회 기준이다. 참가자, 앉는 거리(가슴 0.55m 조건), 카메라 높이·각도를 바꿔 같은 로그(`--log data/judge_<자세>.csv`, 자세당 15초)를 다시 남기고 값이 유지되는지 비교한다. 로그에는 keypoint 점수와 머리·가슴·허리 depth만 남고 좌표는 없다.
 
 ## D. 추가 데이터 수집 (사람당 약 30분)
 
@@ -78,6 +92,13 @@ python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflit
 - [ ] `data/depth_filter_tuning.csv`, `data/capture_features_log.csv`, `data/labels.csv` 커밋·푸시 (원본 사진 `data/raw/`는 git 제외)
 - [ ] Claude에게 전달: ① 필터 비교 표 ② B 체크 결과(틀린 자세·메모) ③ 새로 수집한 장수
 - [ ] 카메라 반납 전 위 세 가지가 끝났는지 재확인 — 나중에 depth 값은 복구할 수 없다
+
+## 10/6 실측에서 얻은 교훈 (다음 촬영 전 확인)
+
+- 구멍 메우기는 `--judge` 파이프라인 카메라에서 "가까운 값" 모드(2)를 쓴다. SDK 기본(먼 값)은 근접 시 얼굴을 지운다.
+- 화면 왼쪽의 `score nose … sh … hip … near_invalid` 줄로 엉덩이 점수와 근접 무효 여부를 같이 본다. 엉덩이 점수가 0.5 아래로 자주 떨어지는 구도(책상이 허리를 가림)에서는 허리 depth 기반 판정이 빠지고 머리-가슴 depth 차로 기댐을 판정한다.
+- 판정 표시는 영문이다(OpenCV는 한글을 못 그린다).
+- 실행 명령에는 `--model models/movenet_lightning_int8.tflite`가 반드시 필요하다.
 
 ## 카메라 없이 미리 해둘 수 있는 것
 
