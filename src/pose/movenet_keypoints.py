@@ -430,7 +430,12 @@ class _RealSenseSource:
         # depth가 0(무효)인 픽셀은 지우지 않는다 — D455는 약 40cm 미만 근접에서 depth가 무효가 되는데,
         # 이걸 "범위 밖"으로 지우면 화면에 너무 가까워진 사용자가 통째로 사라져 근접 감지 자체가
         # 불가능해진다. 먼 곳의 다른 사람은 유효한 depth를 가져 여전히 범위 밖으로 지워진다.
-        return ((depth_m >= min_depth_m) & (depth_m <= max_depth_m)) | (depth_m <= 0)
+        mask = ((depth_m >= min_depth_m) & (depth_m <= max_depth_m)) | (depth_m <= 0)
+        # 근접 시 depth 경계의 가는 무효/노이즈 줄무늬가 얼굴에 검은 줄로 남는 것을 막기 위해
+        # 닫힘 연산으로 작은 구멍을 메운다.
+        import cv2
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        return cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, kernel).astype(bool)
 
     def release(self) -> None:
         self._cam.stop()

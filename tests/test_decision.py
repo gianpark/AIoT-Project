@@ -84,3 +84,8 @@ def test_fallback_depth_triggers_proximity_only_when_depth_missing():
     assert near_missing.proximity
     valid_far = judge(kps(), depth(), fallback_depth_m=0.30)  # depth가 유효하면 depth 우선
     assert not valid_far.proximity
+
+
+def test_back_threshold_matches_field_value():
+    j = judge(kps(), depth(head=0.8, chest=0.8, recline=-0.15))
+    assert j.posture_level == WARNING and j.posture_kind == "slouch_back"

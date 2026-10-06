@@ -90,6 +90,9 @@ def compute_posture_features(keypoints: list["Keypoint"]) -> Optional[dict]:
 DepthLookup = Callable[[float, float], Optional[float]]
 
 
+NEAR_INVALID_DEPTH_M = 0.30  # 이보다 가까우면 D455 depth가 무효로 읽힘(MIN_VALID_DEPTH_M과 동일)
+
+
 def compute_depth_features(
     keypoints: list["Keypoint"],
     depth_lookup: DepthLookup,
@@ -134,6 +137,14 @@ def compute_depth_features(
     if head_depth is None and chest_depth is None and hip_depth is None:
         return None
 
+    # 앞으로 크게 숙이면 어깨(가슴)가 D455 최소 유효거리 안쪽으로 들어와 depth가 무효(None)가 된다.
+    # 어깨 confidence는 충분한데 가슴 depth만 없고 허리 depth가 있으면, 가슴이 NEAR_INVALID_DEPTH_M보다
+    # 가깝다는 뜻이므로 recline >= hip - NEAR_INVALID_DEPTH_M 으로 하한 추정한다(임시, 실측 후 재검토).
+    recline = (hip_depth - chest_depth) if hip_depth is not None and chest_depth is not None else None
+    if (recline is None and chest_depth is None and hip_depth is not None
+            and l_sh.score >= confidence_threshold and r_sh.score >= confidence_threshold):
+        recline = hip_depth - NEAR_INVALID_DEPTH_M
+
     return {
         "head_depth_m": head_depth,
         "chest_depth_m": chest_depth,
@@ -141,7 +152,5 @@ def compute_depth_features(
         "neck_forward_offset_m": (
             (chest_depth - head_depth) if head_depth is not None and chest_depth is not None else None
         ),
-        "torso_recline_offset_m": (
-            (hip_depth - chest_depth) if hip_depth is not None and chest_depth is not None else None
-        ),
+        "torso_recline_offset_m": recline,
     }

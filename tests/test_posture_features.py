@@ -162,3 +162,17 @@ def test_filter_by_confidence_drops_low_confidence_keypoints():
     # 나머지(코, 어깨, 엉덩이 등)는 threshold 이상이라 유지되어야 한다
     for idx in (0, 5, 6, 11, 12):
         assert filtered[idx] is not None
+
+
+def test_depth_features_chest_near_invalid_gives_forward_lower_bound():
+    kps = [FakeKeypoint(f"k{i}", 0.5, 0.5, 0.9) for i in range(17)]
+
+    def lookup(x, y):
+        return None if y < 0.5 else 0.8  # placeholder, overridden below
+
+    ys = {5: 0.3, 6: 0.3, 11: 0.8, 12: 0.8}
+    for i, y in ys.items():
+        kps[i] = FakeKeypoint(f"k{i}", y, 0.5, 0.9)
+    f = compute_depth_features(kps, lambda x, y: None if y < 0.5 else 0.8)
+    assert f["chest_depth_m"] is None
+    assert f["torso_recline_offset_m"] == pytest.approx(0.8 - 0.30)
