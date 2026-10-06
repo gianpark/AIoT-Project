@@ -31,6 +31,7 @@ RECLINE_BACK_WARN_M = 0.11  # 10/6 로그(1인): 정상 +0.054, 기댐 약 -0.11
 # 10/6 로그(1인): 정상 0.153, 기댐 0.062, 심하게 ≈0 — 기댈수록 머리가 가슴 거리로 붙는다. 표본(참가자) 늘려 재보정
 NECK_REF_M = 0.15
 NECK_BACK_WARN_M = 0.07
+NECK_BACK_MIN_CHEST_M = 0.55
 RECLINE_WARN_M = 0.10  # torso_recline_offset_m: +면 숙임(엉덩이가 가슴보다 멀다), -면 기댐 (정상 -0.05, 숙임 +0.17, 기댐 -0.16)
 LATERAL_WARN = 0.35  # 어깨 중점이 엉덩이 중점에서 옆으로 벗어난 정도(어깨너비 단위) — 몸통 약 15° 기울임에 해당하는 잠정값
 CAUTION_RATIO = 0.7  # 경고 임계값의 70%부터 "주의"
@@ -135,7 +136,11 @@ def judge(keypoints, depth_features: Optional[dict],
 
     lat = lateral_offset(keypoints)
     nf = d.get("neck_forward_offset_m")
-    if nf is not None and nf < NECK_REF_M:
+    chest = d.get("chest_depth_m")
+    # 앞으로 숙일 때도 머리-가슴 거리 차가 0 근처로 줄어든다(10/6 forward 로그: 중앙값 0.062, 머리 0.35m/가슴 0.41m).
+    # 기댐과 구분하려고 근접이 아니고 가슴이 정상 거리(0.59m) 근처 이상일 때만 이 신호를 쓴다.
+    if (nf is not None and nf < NECK_REF_M and not proximity
+            and chest is not None and chest >= NECK_BACK_MIN_CHEST_M):
         back = (NECK_REF_M - nf) / (NECK_REF_M - NECK_BACK_WARN_M)
         ratios["slouch_back"] = max(ratios.get("slouch_back", 0.0), back)
 

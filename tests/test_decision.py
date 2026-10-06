@@ -115,3 +115,13 @@ def test_back_lean_detected_from_neck_offset_without_hip():
 def test_logged_recline_values():
     assert judge(kps(), depth(recline=0.054)).posture_kind is None
     assert judge(kps(), depth(recline=-0.117)).posture_kind == "slouch_back"
+
+
+def test_forward_lean_not_mistaken_for_back_by_neck_offset():
+    """10/6 forward 로그 값(머리 0.35m, 가슴 0.41m, nf 0.062)은 기댐이 아니라 앞숙임."""
+    j = judge(kps(), {"head_depth_m": 0.348, "chest_depth_m": 0.412, "hip_depth_m": None,
+                      "torso_recline_offset_m": None, "neck_forward_offset_m": 0.062})
+    assert j.proximity and j.posture_kind == "slouch_forward"
+    mild = judge(kps(), {"head_depth_m": 0.45, "chest_depth_m": 0.50, "hip_depth_m": None,
+                         "torso_recline_offset_m": None, "neck_forward_offset_m": 0.05})
+    assert mild.posture_kind != "slouch_back"
