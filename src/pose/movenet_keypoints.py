@@ -689,7 +689,7 @@ def main():
         header = ["timestamp"] + [f"{name}_score" for name in KEYPOINT_NAMES]
         if args.realsense:
             from src.pose.side_view import ARM_ANGLE_KEYS, SIDE_ANGLE_KEYS
-            header += DEPTH_FEATURE_KEYS + SIDE_ANGLE_KEYS + ARM_ANGLE_KEYS + ["ear_forward_deg"]
+            header += DEPTH_FEATURE_KEYS + SIDE_ANGLE_KEYS + ARM_ANGLE_KEYS + ["eye_forward_deg"]
         log_writer.writerow(header)
 
     # 저장된 사진 각각에 대응하는 depth 특징을 같이 남긴다 — RGB 사진(raw_frame)과 달리
@@ -752,7 +752,7 @@ def main():
     proximity_estimator = ProximityEstimator()
     last_sample_t = None
     from src.pose.side_view import SideViewSmoother
-    body_smoother, arm_smoother, ear_smoother = SideViewSmoother(), SideViewSmoother(), SideViewSmoother()  # 측면 뷰 떨림 완화(EMA)
+    body_smoother, arm_smoother, eye_smoother = SideViewSmoother(), SideViewSmoother(), SideViewSmoother()  # 측면 뷰 떨림 완화(EMA)
     overlay_cache = {"t": 0.0, "lines": []}  # 화면 수치는 0.5초마다만 갱신(매 프레임 바뀌면 읽기 어려움)
     judge_start_t = time.time()  # [알림] 출력에 경과 초를 붙여 쿨다운(60s/300s)을 로그만으로 확인
 
@@ -856,8 +856,8 @@ def main():
             side_ang = {}
             sv_pts = None
             arm_pts = None
-            ear_pts = None
-            ear_fwd = None
+            eye_pts = None
+            eye_fwd = None
             arm_ang = {}
             if depth_lookup is not None:
                 depth_features = compute_depth_features(keypoints, depth_lookup)
@@ -869,14 +869,14 @@ def main():
                                     0.5, (170, 220, 255), 1, cv2.LINE_AA)
                         y0 += 20
                 # 측면 뷰: 점을 EMA로 안정화한 뒤 각도 계산. 화면 수치는 0.5초마다 갱신, --log는 매 프레임 기록
-                from src.pose.side_view import (ARM_ANGLE_KEYS, SIDE_ANGLE_KEYS, arm_angles, ear_forward_deg, side_ear_point,
+                from src.pose.side_view import (ARM_ANGLE_KEYS, SIDE_ANGLE_KEYS, arm_angles, eye_forward_deg, side_head_point,
                                                 side_angles, side_arm_points, side_view_points)
                 fw, fh = frame.shape[1], frame.shape[0]
                 sv_pts = body_smoother.update(side_view_points(keypoints, depth_features, fw, fh))
                 arm_pts = arm_smoother.update(side_arm_points(keypoints, depth_lookup, fw, fh))
-                ear_pts = ear_smoother.update(side_ear_point(keypoints, depth_lookup, fw, fh))
+                eye_pts = eye_smoother.update(side_head_point(keypoints, depth_lookup, fw, fh))
                 side_ang = side_angles(sv_pts)
-                ear_fwd = ear_forward_deg(sv_pts, ear_pts)
+                eye_fwd = eye_forward_deg(sv_pts, eye_pts)
                 arm_ang = arm_angles(arm_pts)
                 now_t = time.time()
                 if now_t - overlay_cache["t"] >= 0.5:
@@ -885,7 +885,7 @@ def main():
                     for k in SIDE_ANGLE_KEYS:
                         v = side_ang.get(k)
                         lines.append(f"{k}: {v:+.1f}" if v is not None else f"{k}: -")
-                    lines.append(f"ear_forward_deg: {ear_fwd:+.1f}" if ear_fwd is not None else "ear_forward_deg: -")
+                    lines.append(f"eye_forward_deg: {eye_fwd:+.1f}" if eye_fwd is not None else "eye_forward_deg: -")
                     for k in ARM_ANGLE_KEYS:
                         v = arm_ang.get(k)
                         lines.append(f"{k}: {v:.0f}" if v is not None else f"{k}: -")
@@ -913,7 +913,7 @@ def main():
                 if args.realsense and not args.no_side_view:
                     from src.pose.side_view import render_side_view
                     lbl = {NORMAL: "NORMAL", CAUTION: "CAUTION", WARNING: "WARNING"}[judgement.posture_level]
-                    cv2.imshow("Side view", render_side_view(sv_pts, color, label=lbl, arm_pts=arm_pts, ear_pts=ear_pts))
+                    cv2.imshow("Side view", render_side_view(sv_pts, color, label=lbl, arm_pts=arm_pts, eye_pts=eye_pts))
                 kind = f" ({judgement.posture_kind})" if judgement.posture_kind else ""
                 near = "  [NEAR]" if judgement.proximity else ""
                 cv2.putText(frame, f"{ {NORMAL: 'NORMAL', CAUTION: 'CAUTION', WARNING: 'WARNING'}[judgement.posture_level]}{kind}{near}", (frame.shape[1] - 470, 28),
@@ -939,7 +939,7 @@ def main():
                         (f"{arm_ang[k]:.1f}" if arm_ang.get(k) is not None else "")
                         for k in ("elbow_left_deg", "elbow_right_deg")
                     ]
-                    row.append(f"{ear_fwd:.2f}" if ear_fwd is not None else "")
+                    row.append(f"{eye_fwd:.2f}" if eye_fwd is not None else "")
                 log_writer.writerow(row)
 
             if capture_mode:

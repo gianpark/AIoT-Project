@@ -79,15 +79,15 @@ def test_arm_points_and_elbow_angle():
     assert side_arm_points(k, None, 640, 480) is None
 
 
-def test_ear_point_head_circle_and_angle():
-    from src.pose.side_view import ear_forward_deg, side_ear_point
+def test_eye_point_head_circle_and_angle():
+    from src.pose.side_view import eye_forward_deg, side_head_point
     k = kps()
-    k[3] = Keypoint(name="k3", x=0.46, y=0.27, score=0.9)
-    ear = side_ear_point(k, lambda x, y: 0.55, 640, 480)
-    assert ear["ear"][2] and ear["ear"][1] > 0
+    k[1] = Keypoint(name="k1", x=0.46, y=0.27, score=0.9)
+    ear = side_head_point(k, lambda x, y: 0.55, 640, 480)
+    assert ear["eye"][2] and ear["eye"][1] > 0
     pts = side_view_points(k, {"head_depth_m": 0.45, "chest_depth_m": 0.60, "hip_depth_m": 0.65}, 640, 480)
-    assert ear_forward_deg(pts, ear) > 0  # 귀가 가슴보다 카메라 쪽 = 양수
-    assert render_side_view(pts, ear_pts=ear).shape == (420, 360, 3)
-    k[3] = Keypoint(name="k3", x=0.46, y=0.27, score=0.1)
-    k[4] = Keypoint(name="k4", x=0.54, y=0.27, score=0.1)
-    assert side_ear_point(k, lambda x, y: 0.55, 640, 480) is None
+    assert eye_forward_deg(pts, ear) > 0  # 귀가 가슴보다 카메라 쪽 = 양수
+    assert render_side_view(pts, eye_pts=ear).shape == (420, 360, 3)
+    k[1] = Keypoint(name="k1", x=0.46, y=0.27, score=0.1)
+    k[2] = Keypoint(name="k2", x=0.54, y=0.27, score=0.1)
+    assert side_head_point(k, lambda x, y: 0.55, 640, 480) is None
