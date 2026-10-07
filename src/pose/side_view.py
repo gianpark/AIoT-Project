@@ -117,37 +117,6 @@ def side_arm_points(keypoints, depth_lookup, frame_w: int, frame_h: int, min_sco
 HEAD_RADIUS_M = 0.11  # 머리 반지름(성인 머리 높이 약 0.22~0.23m 가정)
 
 
-def side_head_point(keypoints, depth_lookup, frame_w: int, frame_h: int, min_score: float = 0.3,
-                    idxs=(1, 2)) -> Optional[dict]:
-    """눈(양쪽 중 보이는 것의 평균, MoveNet 1·2번) 위치 -> {'eye': (z, up, valid)}. 머리 모양(원)을 그리는 기준.
-    귀(3·4번)는 머리가 기울면 위치가 쉽게 틀어져 눈을 기본으로 쓴다(idxs=(3, 4)로 귀도 가능).
-    depth를 못 읽으면 valid=False."""
-    l_sh, r_sh = keypoints[5], keypoints[6]
-    pts_e = [keypoints[i] for i in idxs if keypoints[i].score >= min_score]
-    if not pts_e or l_sh.score < min_score or r_sh.score < min_score:
-        return None
-    sw_px = float(np.hypot((l_sh.x - r_sh.x) * frame_w, (l_sh.y - r_sh.y) * frame_h))
-    if sw_px < 1.0:
-        return None
-    ex = sum(e.x for e in pts_e) / len(pts_e)
-    ey = sum(e.y for e in pts_e) / len(pts_e)
-    chest_y = (l_sh.y + r_sh.y) / 2.0
-    up = (chest_y - ey) * frame_h * ADULT_SHOULDER_WIDTH_M / sw_px
-    z = depth_lookup(ex, ey) if depth_lookup is not None else None
-    return {"eye": (float(z) if z is not None else 0.0, float(up), z is not None)}
-
-
-def eye_forward_deg(pts: Optional[dict], eye_pts: Optional[dict]) -> Optional[float]:
-    """가슴->눈 선이 수직선에서 카메라 쪽으로 기운 각도(도). +면 눈이 어깨보다 앞(거북목 방향).
-    코 기반 head_forward_deg보다 고개 숙임/젖힘에 덜 흔들린다. 눈 또는 가슴 depth가 없으면 None."""
-    if not pts or not eye_pts or not pts["chest"][2]:
-        return None
-    eye = eye_pts["eye"]
-    if not eye[2] or eye[1] <= 0:
-        return None
-    return math.degrees(math.atan2(pts["chest"][0] - eye[0], eye[1]))
-
-
 ARM_ANGLE_KEYS = ["elbow_left_deg", "elbow_right_deg"]
 
 
@@ -208,8 +177,7 @@ def reference_points(pts: dict) -> dict:
     }
 
 
-def render_side_view(pts: Optional[dict], level_color=(0, 255, 170), size=(360, 420), label: str = "", arm_pts: Optional[dict] = None,
-                     eye_pts: Optional[dict] = None):
+def render_side_view(pts: Optional[dict], level_color=(0, 255, 170), size=(360, 420), label: str = "", arm_pts: Optional[dict] = None):
     """측면 뷰 이미지(BGR)를 만든다. pts가 None이면 안내 문구만 그린다."""
     import cv2
 
@@ -261,17 +229,10 @@ def render_side_view(pts: Optional[dict], level_color=(0, 255, 170), size=(360, 
             for (z, up, ok), pt in zip(seq, px):
                 if ok:
                     cv2.circle(img, pt, 4, col, -1, cv2.LINE_AA)
-    if eye_pts:  # 머리 모양: 눈 기준으로 한 원 + 코 방향(카메라 쪽) 표시
-        ez, eup, eok = eye_pts["eye"]
-        if not eok:
-            ez = pts["head"][0]  # 눈 depth 없음: 코와 같은 거리에 회색으로
-        c = to_px(ez + 0.05, eup - 0.03)  # 머리 중심은 눈보다 약 5cm 뒤, 3cm 아래
-        r = int(HEAD_RADIUS_M * px_per_m)
-        cv2.circle(img, c, r, level_color if eok else (150, 150, 150), 2, cv2.LINE_AA)
-        nose = to_px(pts["head"][0], pts["head"][1])
-        cv2.line(img, c, nose, (230, 230, 230), 1, cv2.LINE_AA)
-        cv2.circle(img, c, 3, (230, 230, 230), -1, cv2.LINE_AA)
-        cv2.putText(img, "eye", (c[0] - 10, c[1] - r - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1, cv2.LINE_AA)
+    # 머리 모양: 코를 얼굴 끝으로 보고, 그 뒤쪽(코 거리 + 반지름 - 1cm)에 원을 그린다.
+    hz, hup, hok = pts["head"]
+    c = to_px(hz + HEAD_RADIUS_M - 0.01, hup + 0.02)
+    cv2.circle(img, c, int(HEAD_RADIUS_M * px_per_m), level_color if hok else (150, 150, 150), 2, cv2.LINE_AA)
     names = {"head": "head", "chest": "chest", "hip": "hip"}
     for n, p in zip(order, cur):
         if pts[n][2]:
@@ -288,13 +249,10 @@ def render_side_view(pts: Optional[dict], level_color=(0, 255, 170), size=(360, 
         v = ang[key]
         txt = f"{name}: {v:+.0f} deg" if v is not None else f"{name}: n/a"
         cv2.putText(img, txt, (w - 150, 20 + 18 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (230, 230, 230), 1, cv2.LINE_AA)
-    ef = eye_forward_deg(pts, eye_pts)
-    cv2.putText(img, f"eye fwd: {ef:+.0f} deg" if ef is not None else "eye fwd: n/a", (w - 150, 92),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (230, 230, 230), 1, cv2.LINE_AA)
     arm = arm_angles(arm_pts)
     for i, (name, key, col) in enumerate((("elbow L", "elbow_left_deg", (255, 200, 90)),
                                           ("elbow R", "elbow_right_deg", (200, 120, 255)))):
         v = arm[key]
         txt = f"{name}: {v:.0f} deg" if v is not None else f"{name}: n/a"
-        cv2.putText(img, txt, (w - 150, 112 + 18 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.45, col, 1, cv2.LINE_AA)
+        cv2.putText(img, txt, (w - 150, 56 + 18 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.45, col, 1, cv2.LINE_AA)
     return img
