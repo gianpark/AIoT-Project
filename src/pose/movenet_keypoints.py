@@ -648,6 +648,11 @@ def main():
     parser.add_argument("--duration", type=float, default=0.0,
                          help="카운트다운이 끝난 뒤 이 시간(초)이 지나면 자동 종료한다(0이면 q를 누를 때까지). "
                               "예: --countdown 3 --duration 20")
+    parser.add_argument("--snap-every", type=float, default=0.0,
+                         help="카운트다운이 끝난 뒤 이 간격(초)마다 화면(스켈레톤·판정 표시 포함)을 jpg로 저장한다(0이면 끔). "
+                              "로그 구간이 실제로 그 자세였는지 나중에 눈으로 확인하는 용도. 예: --snap-every 2")
+    parser.add_argument("--snap-dir", type=str, default=None,
+                         help="--snap-every 저장 폴더 (기본: data/snaps/<--log 파일 이름>)")
     parser.add_argument("--sample-interval", type=float, default=5.0,
                          help="--judge에서 알림 상태머신에 샘플을 넣는 주기(초), 기본 5 (project.md 5초 샘플링)")
     args = parser.parse_args()
@@ -763,6 +768,12 @@ def main():
 
     print(f"실행 중 (소스: {'RealSense D455' if args.realsense else f'웹캠 index={args.camera}'})... 'q'를 누르면 종료합니다.")
     run_start_t = time.time()
+    snap_dir = None
+    next_snap_s = 0.0
+    if args.snap_every > 0:
+        snap_dir = Path(args.snap_dir) if args.snap_dir else Path("data/snaps") / (Path(args.log).stem if args.log else "run")
+        snap_dir.mkdir(parents=True, exist_ok=True)
+        print(f"{args.snap_every:g}초마다 화면을 {snap_dir} 에 저장합니다.")
     try:
         while True:
             frame = source.read()
@@ -976,6 +987,12 @@ def main():
                 else:
                     msg, col = f"REC {run_elapsed - args.countdown:4.1f}s", (0, 0, 255)
                 cv2.putText(frame, msg, (10, frame.shape[0] - 14), cv2.FONT_HERSHEY_SIMPLEX, 0.7, col, 2, cv2.LINE_AA)
+
+            if snap_dir is not None and not in_countdown:
+                rec_s = run_elapsed - args.countdown
+                if rec_s >= next_snap_s:
+                    cv2.imwrite(str(snap_dir / f"{snap_dir.name}_{rec_s:05.1f}s.jpg"), frame)
+                    next_snap_s += args.snap_every
 
             cv2.imshow("MoveNet 17 Keypoints (q to quit)", frame)
             key = cv2.waitKey(1) & 0xFF
