@@ -117,6 +117,37 @@ def side_arm_points(keypoints, depth_lookup, frame_w: int, frame_h: int, min_sco
 HEAD_RADIUS_M = 0.11  # 머리 반지름(성인 머리 높이 약 0.22~0.23m 가정)
 
 
+EXTRA_KEYS = ["torso_len_sw", "head_up_m", "wrist_face_sw"]
+
+
+def extra_features(keypoints, sv_pts: Optional[dict], frame_w: int, frame_h: int, min_score: float = 0.3) -> dict:
+    """복합 자세 분석용 보조 특징(--log에 기록, 아직 판정에는 안 씀):
+    - torso_len_sw: 가슴~엉덩이 세로 길이를 어깨너비로 나눈 값. 허리 구부정(몸통이 짧아짐) 후보 신호.
+    - head_up_m: 가슴 기준 코 높이(m, 측면 뷰 값). 고개 숙임/젖힘.
+    - wrist_face_sw: 코에서 가장 가까운 손목까지 거리(어깨너비 단위). 턱 괴기 후보 신호(작을수록 손이 얼굴 근처).
+    값이 없으면 None."""
+    out = {k: None for k in EXTRA_KEYS}
+    l_sh, r_sh, nose = keypoints[5], keypoints[6], keypoints[0]
+    if l_sh.score < min_score or r_sh.score < min_score:
+        return out
+    sw_px = float(np.hypot((l_sh.x - r_sh.x) * frame_w, (l_sh.y - r_sh.y) * frame_h))
+    if sw_px < 1.0:
+        return out
+    l_hip, r_hip = keypoints[11], keypoints[12]
+    if l_hip.score >= min_score and r_hip.score >= min_score:
+        chest_y = (l_sh.y + r_sh.y) / 2.0
+        hip_y = (l_hip.y + r_hip.y) / 2.0
+        out["torso_len_sw"] = (hip_y - chest_y) * frame_h / sw_px
+    if sv_pts is not None:
+        out["head_up_m"] = sv_pts["head"][1]
+    if nose.score >= min_score:
+        ds = [float(np.hypot((w.x - nose.x) * frame_w, (w.y - nose.y) * frame_h)) / sw_px
+              for w in (keypoints[9], keypoints[10]) if w.score >= min_score]
+        if ds:
+            out["wrist_face_sw"] = min(ds)
+    return out
+
+
 ARM_ANGLE_KEYS = ["elbow_left_deg", "elbow_right_deg"]
 
 

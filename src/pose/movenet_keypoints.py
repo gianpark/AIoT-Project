@@ -688,8 +688,8 @@ def main():
         log_writer = csv.writer(log_file)
         header = ["timestamp"] + [f"{name}_score" for name in KEYPOINT_NAMES]
         if args.realsense:
-            from src.pose.side_view import ARM_ANGLE_KEYS, SIDE_ANGLE_KEYS
-            header += DEPTH_FEATURE_KEYS + SIDE_ANGLE_KEYS + ARM_ANGLE_KEYS
+            from src.pose.side_view import ARM_ANGLE_KEYS, EXTRA_KEYS, SIDE_ANGLE_KEYS
+            header += DEPTH_FEATURE_KEYS + SIDE_ANGLE_KEYS + ARM_ANGLE_KEYS + EXTRA_KEYS
         log_writer.writerow(header)
 
     # 저장된 사진 각각에 대응하는 depth 특징을 같이 남긴다 — RGB 사진(raw_frame)과 달리
@@ -857,6 +857,7 @@ def main():
             sv_pts = None
             arm_pts = None
             arm_ang = {}
+            extra = {}
             if depth_lookup is not None:
                 depth_features = compute_depth_features(keypoints, depth_lookup)
                 if depth_features:
@@ -867,13 +868,14 @@ def main():
                                     0.5, (170, 220, 255), 1, cv2.LINE_AA)
                         y0 += 20
                 # 측면 뷰: 점을 EMA로 안정화한 뒤 각도 계산. 화면 수치는 0.5초마다 갱신, --log는 매 프레임 기록
-                from src.pose.side_view import (ARM_ANGLE_KEYS, SIDE_ANGLE_KEYS, arm_angles,
+                from src.pose.side_view import (ARM_ANGLE_KEYS, SIDE_ANGLE_KEYS, arm_angles, extra_features,
                                                 side_angles, side_arm_points, side_view_points)
                 fw, fh = frame.shape[1], frame.shape[0]
                 sv_pts = body_smoother.update(side_view_points(keypoints, depth_features, fw, fh))
                 arm_pts = arm_smoother.update(side_arm_points(keypoints, depth_lookup, fw, fh))
                 side_ang = side_angles(sv_pts)
                 arm_ang = arm_angles(arm_pts)
+                extra = extra_features(keypoints, sv_pts, fw, fh)
                 now_t = time.time()
                 if now_t - overlay_cache["t"] >= 0.5:
                     overlay_cache["t"] = now_t
@@ -911,6 +913,8 @@ def main():
                     cv2.imshow("Side view", render_side_view(sv_pts, color, label=lbl, arm_pts=arm_pts))
                 kind = f" ({judgement.posture_kind})" if judgement.posture_kind else ""
                 near = "  [NEAR]" if judgement.proximity else ""
+                if len(judgement.issues) > 1:  # 복합 자세: 1순위 외 나머지 문제도 표시
+                    kind += " +" + "+".join(k for k, _ in judgement.issues if k != judgement.posture_kind)
                 cv2.putText(frame, f"{ {NORMAL: 'NORMAL', CAUTION: 'CAUTION', WARNING: 'WARNING'}[judgement.posture_level]}{kind}{near}", (frame.shape[1] - 470, 28),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2, cv2.LINE_AA)
                 now = time.time()
@@ -933,6 +937,10 @@ def main():
                     row += [
                         (f"{arm_ang[k]:.1f}" if arm_ang.get(k) is not None else "")
                         for k in ("elbow_left_deg", "elbow_right_deg")
+                    ]
+                    row += [
+                        (f"{extra[k]:.3f}" if extra.get(k) is not None else "")
+                        for k in ("torso_len_sw", "head_up_m", "wrist_face_sw")
                     ]
                 log_writer.writerow(row)
 

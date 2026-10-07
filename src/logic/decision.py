@@ -80,6 +80,8 @@ class Judgement:
     posture_kind: Optional[str]  # slouch_forward / slouch_back / tilt_left / tilt_right / None
     proximity: bool  # 화면 근접 여부
     reasons: list[str] = field(default_factory=list)
+    # 복합 자세: 주의 이상(경고 임계의 70%+)인 모든 문제를 (kind, 비율) 내림차순으로. posture_kind는 이 중 1순위.
+    issues: list[tuple[str, float]] = field(default_factory=list)
 
     @property
     def needs_attention(self) -> bool:
@@ -148,6 +150,7 @@ def judge(keypoints, depth_features: Optional[dict],
         # 이미지 왼쪽(음수)은 참가자 본인 기준 오른쪽 (비반전 영상, project 좌우 규칙)
         ratios["tilt_right" if lat < 0 else "tilt_left"] = abs(lat) / LATERAL_WARN
 
+    issues = sorted(((k, r) for k, r in ratios.items() if r >= CAUTION_RATIO), key=lambda kr: -kr[1])
     kind, ratio = (max(ratios.items(), key=lambda kv: kv[1]) if ratios else (None, 0.0))
     if ratio >= 1.0:
         level = WARNING
@@ -157,7 +160,10 @@ def judge(keypoints, depth_features: Optional[dict],
         level, kind = NORMAL, None
     if kind:
         reasons.append(f"{kind} {ratio:.2f}x")
-    return Judgement(level, kind, proximity, reasons)
+        reasons.extend(f"{k} {r:.2f}x" for k, r in issues if k != kind)
+    else:
+        issues = []
+    return Judgement(level, kind, proximity, reasons, issues)
 
 
 class AlertStateMachine:

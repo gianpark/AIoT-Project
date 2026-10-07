@@ -125,3 +125,12 @@ def test_forward_lean_not_mistaken_for_back_by_neck_offset():
     mild = judge(kps(), {"head_depth_m": 0.45, "chest_depth_m": 0.50, "hip_depth_m": None,
                          "torso_recline_offset_m": None, "neck_forward_offset_m": 0.05})
     assert mild.posture_kind != "slouch_back"
+
+
+def test_issues_lists_all_compound_problems():
+    # 뒤로 기댐(recline -0.16) + 옆 기울임(shoulder_dx 큼)이 동시에 -> 두 문제 모두 issues에 남는다
+    j = judge(kps(shoulder_dx=0.12), depth(recline=-0.16))
+    kinds = [k for k, _ in j.issues]
+    assert "slouch_back" in kinds and any(k.startswith("tilt") for k in kinds)
+    assert j.posture_kind == kinds[0]
+    assert judge(kps(), depth()).issues == []

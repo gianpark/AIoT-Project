@@ -82,3 +82,17 @@ def test_arm_points_and_elbow_angle():
 def test_head_circle_drawn_around_nose():
     pts = side_view_points(kps(), {"head_depth_m": 0.45, "chest_depth_m": 0.60, "hip_depth_m": 0.65}, 640, 480)
     assert render_side_view(pts, arm_pts=None).shape == (420, 360, 3)
+
+
+def test_extra_features_values_and_missing():
+    from src.pose.side_view import EXTRA_KEYS, extra_features
+    k = kps()
+    k[10] = Keypoint(name="k10", x=0.52, y=0.30, score=0.9)  # 손목이 코 근처
+    pts = side_view_points(k, {"head_depth_m": 0.45, "chest_depth_m": 0.60, "hip_depth_m": 0.65}, 640, 480)
+    e = extra_features(k, pts, 640, 480)
+    assert e["torso_len_sw"] > 0 and e["head_up_m"] > 0 and e["wrist_face_sw"] < 1.0
+    k2 = kps(hip_score=0.1)
+    k2[9] = Keypoint(name="k9", x=0.5, y=0.5, score=0.1)
+    k2[10] = Keypoint(name="k10", x=0.5, y=0.5, score=0.1)
+    e2 = extra_features(k2, None, 640, 480)
+    assert all(e2[key] is None for key in EXTRA_KEYS)
