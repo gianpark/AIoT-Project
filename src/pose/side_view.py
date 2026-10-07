@@ -58,6 +58,84 @@ def side_view_points(keypoints, depth_features: Optional[dict], frame_w: int, fr
 SIDE_ANGLE_KEYS = ["head_forward_deg", "torso_pitch_deg"]
 
 
+class SideViewSmoother:
+    """프레임마다 흔들리는 측면 뷰를 안정화한다: 거리·높이는 지수이동평균(EMA), depth가 잠깐 끊겨도
+    hold_frames 동안은 마지막 값을 유지(그 뒤에도 없으면 n/a). 판정(judge)은 원본 depth_features를 쓰므로 영향 없음.
+    점 이름은 입력 dict의 키를 그대로 쓴다(head/chest/hip, 팔 점 등)."""
+
+    def __init__(self, alpha: float = 0.2, hold_frames: int = 15):
+        self.alpha = alpha
+        self.hold_frames = hold_frames
+        self._z: dict[str, float] = {}
+        self._up: dict[str, float] = {}
+        self._missing: dict[str, int] = {}
+
+    def update(self, pts: Optional[dict]) -> Optional[dict]:
+        if pts is None:
+            for n in self._missing:
+                self._missing[n] += 1
+        else:
+            for n, (z, up, valid) in pts.items():
+                self._up[n] = up if n not in self._up else self._up[n] + self.alpha * (up - self._up[n])
+                if valid:
+                    self._z[n] = z if n not in self._z else self._z[n] + self.alpha * (z - self._z[n])
+                    self._missing[n] = 0
+                else:
+                    self._missing[n] = self._missing.get(n, 0) + 1
+        if not self._up:
+            return None
+        known_z = [self._z[n] for n in ("chest", "head", "hip") if n in self._z]
+        out = {}
+        for n, up in self._up.items():
+            ok = n in self._z and self._missing.get(n, 0) <= self.hold_frames
+            z = self._z[n] if n in self._z else (known_z[0] if known_z else 0.6)
+            out[n] = (z, up, ok)
+        return out
+
+
+def side_arm_points(keypoints, depth_lookup, frame_w: int, frame_h: int, min_score: float = 0.3) -> Optional[dict]:
+    """양팔(어깨-팔꿈치-손목)의 측면 점. 키는 'l_sh','l_el','l_wr','r_sh','r_el','r_wr'(MoveNet 기준 피사체의 왼/오른쪽).
+    depth를 못 읽은 점은 valid=False. 어깨너비 0.40m 가정으로 높이를 환산한다(머리·가슴과 같은 기준)."""
+    l_sh, r_sh = keypoints[5], keypoints[6]
+    if l_sh.score < min_score or r_sh.score < min_score or depth_lookup is None:
+        return None
+    sw_px = float(np.hypot((l_sh.x - r_sh.x) * frame_w, (l_sh.y - r_sh.y) * frame_h))
+    if sw_px < 1.0:
+        return None
+    m_per_px = ADULT_SHOULDER_WIDTH_M / sw_px
+    chest_y = (l_sh.y + r_sh.y) / 2.0
+    out = {}
+    for tag, idxs in (("l", (5, 7, 9)), ("r", (6, 8, 10))):
+        for part, i in zip(("sh", "el", "wr"), idxs):
+            kp = keypoints[i]
+            up = (chest_y - kp.y) * frame_h * m_per_px
+            z = depth_lookup(kp.x, kp.y) if kp.score >= min_score else None
+            out[f"{tag}_{part}"] = (float(z) if z is not None else 0.0, float(up), z is not None)
+    return out
+
+
+ARM_ANGLE_KEYS = ["elbow_left_deg", "elbow_right_deg"]
+
+
+def arm_angles(arm_pts: Optional[dict]) -> dict:
+    """팔꿈치 각도(도): 어깨-팔꿈치-손목 세 점이 모두 depth를 가질 때 측면 평면(거리, 높이)에서 계산.
+    180°에 가까우면 팔이 펴진 상태, 90° 안팎이 책상 작업의 일반적인 팔꿈치 각도로 알려져 있다(기준은 미확정)."""
+    out = {k: None for k in ARM_ANGLE_KEYS}
+    if not arm_pts:
+        return out
+    for tag, key in (("l", "elbow_left_deg"), ("r", "elbow_right_deg")):
+        sh, el, wr = arm_pts[f"{tag}_sh"], arm_pts[f"{tag}_el"], arm_pts[f"{tag}_wr"]
+        if not (sh[2] and el[2] and wr[2]):
+            continue
+        v1 = np.array([sh[0] - el[0], sh[1] - el[1]])
+        v2 = np.array([wr[0] - el[0], wr[1] - el[1]])
+        n = np.linalg.norm(v1) * np.linalg.norm(v2)
+        if n < 1e-9:
+            continue
+        out[key] = math.degrees(math.acos(float(np.clip(np.dot(v1, v2) / n, -1.0, 1.0))))
+    return out
+
+
 def side_angles(pts: Optional[dict]) -> dict:
     """측면 뷰 점에서 두 각도(도, 수직선 기준)를 계산한다. depth가 없는 점이 필요한 각도는 None.
 
@@ -96,7 +174,7 @@ def reference_points(pts: dict) -> dict:
     }
 
 
-def render_side_view(pts: Optional[dict], level_color=(0, 255, 170), size=(360, 420), label: str = ""):
+def render_side_view(pts: Optional[dict], level_color=(0, 255, 170), size=(360, 420), label: str = "", arm_pts: Optional[dict] = None):
     """측면 뷰 이미지(BGR)를 만든다. pts가 None이면 안내 문구만 그린다."""
     import cv2
 
@@ -138,6 +216,16 @@ def render_side_view(pts: Optional[dict], level_color=(0, 255, 170), size=(360, 
     cur = [to_px(pts[n][0], pts[n][1]) for n in order]
     for a, b in zip(cur, cur[1:]):
         cv2.line(img, a, b, level_color, 3, cv2.LINE_AA)
+    if arm_pts:  # 팔: 어깨-팔꿈치-손목 (depth가 있는 점만). 왼팔은 하늘색, 오른팔은 분홍
+        for tag, col in (("l", (255, 200, 90)), ("r", (200, 120, 255))):
+            seq = [arm_pts[f"{tag}_{p}"] for p in ("sh", "el", "wr")]
+            px = [to_px(z, up) for z, up, ok in seq]
+            for i in range(2):
+                if seq[i][2] and seq[i + 1][2]:
+                    cv2.line(img, px[i], px[i + 1], col, 2, cv2.LINE_AA)
+            for (z, up, ok), pt in zip(seq, px):
+                if ok:
+                    cv2.circle(img, pt, 4, col, -1, cv2.LINE_AA)
     names = {"head": "head", "chest": "chest", "hip": "hip"}
     for n, p in zip(order, cur):
         if pts[n][2]:
@@ -154,4 +242,10 @@ def render_side_view(pts: Optional[dict], level_color=(0, 255, 170), size=(360, 
         v = ang[key]
         txt = f"{name}: {v:+.0f} deg" if v is not None else f"{name}: n/a"
         cv2.putText(img, txt, (w - 150, 20 + 18 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (230, 230, 230), 1, cv2.LINE_AA)
+    arm = arm_angles(arm_pts)
+    for i, (name, key, col) in enumerate((("elbow L", "elbow_left_deg", (255, 200, 90)),
+                                          ("elbow R", "elbow_right_deg", (200, 120, 255)))):
+        v = arm[key]
+        txt = f"{name}: {v:.0f} deg" if v is not None else f"{name}: n/a"
+        cv2.putText(img, txt, (w - 150, 56 + 18 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.45, col, 1, cv2.LINE_AA)
     return img

@@ -48,3 +48,32 @@ def test_side_angles_none_without_depth():
     a = side_angles(side_view_points(kps(), {"head_depth_m": 0.45, "chest_depth_m": 0.60, "hip_depth_m": None}, 640, 480))
     assert a["head_forward_deg"] is not None and a["torso_pitch_deg"] is None
     assert side_angles(None) == {"head_forward_deg": None, "torso_pitch_deg": None}
+
+
+def test_smoother_ema_hold_and_never_valid():
+    from src.pose.side_view import SideViewSmoother
+    sm = SideViewSmoother(alpha=0.5, hold_frames=2)
+    out = sm.update({"head": (0.40, 0.2, True), "chest": (0.60, 0.0, True), "hip": (0.65, -0.3, False)})
+    assert out["hip"][2] is False  # 한 번도 depth가 없던 점은 유효로 바뀌지 않는다
+    out = sm.update({"head": (0.50, 0.2, True), "chest": (0.60, 0.0, True), "hip": (0.65, -0.3, False)})
+    assert abs(out["head"][0] - 0.45) < 1e-9  # EMA
+    for _ in range(2):
+        out = sm.update({"head": (0.0, 0.2, False), "chest": (0.60, 0.0, True), "hip": (0.65, -0.3, False)})
+    assert out["head"][2] is True and abs(out["head"][0] - 0.45) < 1e-9  # hold
+    out = sm.update({"head": (0.0, 0.2, False), "chest": (0.60, 0.0, True), "hip": (0.65, -0.3, False)})
+    assert out["head"][2] is False  # hold 초과
+
+
+def test_arm_points_and_elbow_angle():
+    from src.pose.side_view import arm_angles, render_side_view, side_arm_points
+    k = kps()
+    k[7] = Keypoint(name="k7", x=0.40, y=0.55, score=0.9)  # left elbow
+    k[9] = Keypoint(name="k9", x=0.42, y=0.55, score=0.9)  # left wrist
+    z = {(0.42, 0.40): 0.60, (0.40, 0.55): 0.60, (0.42, 0.55): 0.45}
+    arm = side_arm_points(k, lambda x, y: z.get((round(x, 2), round(y, 2))), 640, 480)
+    assert arm["l_el"][2] and arm["l_wr"][2] and not arm["r_wr"][2]
+    ang = arm_angles(arm)
+    assert 80 < ang["elbow_left_deg"] < 100 and ang["elbow_right_deg"] is None  # 위팔 수직, 아래팔 앞으로 = 약 90도
+    pts = side_view_points(kps(), {"head_depth_m": 0.45, "chest_depth_m": 0.60, "hip_depth_m": 0.65}, 640, 480)
+    assert render_side_view(pts, arm_pts=arm).shape == (420, 360, 3)
+    assert side_arm_points(k, None, 640, 480) is None
