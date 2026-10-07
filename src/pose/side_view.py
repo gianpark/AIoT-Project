@@ -114,6 +114,38 @@ def side_arm_points(keypoints, depth_lookup, frame_w: int, frame_h: int, min_sco
     return out
 
 
+HEAD_RADIUS_M = 0.11  # 머리 반지름(성인 머리 높이 약 0.22~0.23m 가정)
+
+
+def side_ear_point(keypoints, depth_lookup, frame_w: int, frame_h: int, min_score: float = 0.3) -> Optional[dict]:
+    """귀(양쪽 중 보이는 것의 평균) 위치 -> {'ear': (z, up, valid)}. 머리 모양(원)의 중심으로 쓴다.
+    코-귀로 머리 위치를 특정하기 위함. 귀 depth를 못 읽으면 valid=False."""
+    l_sh, r_sh = keypoints[5], keypoints[6]
+    ears = [keypoints[i] for i in (3, 4) if keypoints[i].score >= min_score]
+    if not ears or l_sh.score < min_score or r_sh.score < min_score:
+        return None
+    sw_px = float(np.hypot((l_sh.x - r_sh.x) * frame_w, (l_sh.y - r_sh.y) * frame_h))
+    if sw_px < 1.0:
+        return None
+    ex = sum(e.x for e in ears) / len(ears)
+    ey = sum(e.y for e in ears) / len(ears)
+    chest_y = (l_sh.y + r_sh.y) / 2.0
+    up = (chest_y - ey) * frame_h * ADULT_SHOULDER_WIDTH_M / sw_px
+    z = depth_lookup(ex, ey) if depth_lookup is not None else None
+    return {"ear": (float(z) if z is not None else 0.0, float(up), z is not None)}
+
+
+def ear_forward_deg(pts: Optional[dict], ear_pts: Optional[dict]) -> Optional[float]:
+    """가슴->귀 선이 수직선에서 카메라 쪽으로 기운 각도(도). +면 귀가 어깨보다 앞(거북목 방향).
+    코 기반 head_forward_deg보다 고개 숙임/젖힘에 덜 흔들린다. 귀 또는 가슴 depth가 없으면 None."""
+    if not pts or not ear_pts or not pts["chest"][2]:
+        return None
+    ear = ear_pts["ear"]
+    if not ear[2] or ear[1] <= 0:
+        return None
+    return math.degrees(math.atan2(pts["chest"][0] - ear[0], ear[1]))
+
+
 ARM_ANGLE_KEYS = ["elbow_left_deg", "elbow_right_deg"]
 
 
@@ -174,7 +206,8 @@ def reference_points(pts: dict) -> dict:
     }
 
 
-def render_side_view(pts: Optional[dict], level_color=(0, 255, 170), size=(360, 420), label: str = "", arm_pts: Optional[dict] = None):
+def render_side_view(pts: Optional[dict], level_color=(0, 255, 170), size=(360, 420), label: str = "", arm_pts: Optional[dict] = None,
+                     ear_pts: Optional[dict] = None):
     """측면 뷰 이미지(BGR)를 만든다. pts가 None이면 안내 문구만 그린다."""
     import cv2
 
@@ -226,6 +259,17 @@ def render_side_view(pts: Optional[dict], level_color=(0, 255, 170), size=(360, 
             for (z, up, ok), pt in zip(seq, px):
                 if ok:
                     cv2.circle(img, pt, 4, col, -1, cv2.LINE_AA)
+    if ear_pts:  # 머리 모양: 귀를 중심으로 한 원 + 코 방향(카메라 쪽) 표시
+        ez, eup, eok = ear_pts["ear"]
+        if not eok:
+            ez = pts["head"][0] + 0.08  # 귀 depth 없음: 코보다 약간 뒤에 회색으로
+        c = to_px(ez, eup)
+        r = int(HEAD_RADIUS_M * px_per_m)
+        cv2.circle(img, c, r, level_color if eok else (150, 150, 150), 2, cv2.LINE_AA)
+        nose = to_px(pts["head"][0], pts["head"][1])
+        cv2.line(img, c, nose, (230, 230, 230), 1, cv2.LINE_AA)
+        cv2.circle(img, c, 3, (230, 230, 230), -1, cv2.LINE_AA)
+        cv2.putText(img, "ear", (c[0] - 10, c[1] - r - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1, cv2.LINE_AA)
     names = {"head": "head", "chest": "chest", "hip": "hip"}
     for n, p in zip(order, cur):
         if pts[n][2]:
@@ -242,10 +286,13 @@ def render_side_view(pts: Optional[dict], level_color=(0, 255, 170), size=(360, 
         v = ang[key]
         txt = f"{name}: {v:+.0f} deg" if v is not None else f"{name}: n/a"
         cv2.putText(img, txt, (w - 150, 20 + 18 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (230, 230, 230), 1, cv2.LINE_AA)
+    ef = ear_forward_deg(pts, ear_pts)
+    cv2.putText(img, f"ear fwd: {ef:+.0f} deg" if ef is not None else "ear fwd: n/a", (w - 150, 92),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (230, 230, 230), 1, cv2.LINE_AA)
     arm = arm_angles(arm_pts)
     for i, (name, key, col) in enumerate((("elbow L", "elbow_left_deg", (255, 200, 90)),
                                           ("elbow R", "elbow_right_deg", (200, 120, 255)))):
         v = arm[key]
         txt = f"{name}: {v:.0f} deg" if v is not None else f"{name}: n/a"
-        cv2.putText(img, txt, (w - 150, 56 + 18 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.45, col, 1, cv2.LINE_AA)
+        cv2.putText(img, txt, (w - 150, 112 + 18 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.45, col, 1, cv2.LINE_AA)
     return img
