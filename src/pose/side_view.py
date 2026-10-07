@@ -217,8 +217,9 @@ def render_side_view(pts: Optional[dict], level_color=(0, 255, 170), size=(360, 
         cv2.circle(img, p, 4, (130, 130, 130), 1, cv2.LINE_AA)
 
     cur = [to_px(pts[n][0], pts[n][1]) for n in order]
-    for a, b in zip(cur, cur[1:]):
-        cv2.line(img, a, b, level_color, 3, cv2.LINE_AA)
+    hc = to_px(pts["head"][0] + HEAD_RADIUS_M - 0.01, pts["head"][1] + 0.02)  # 머리 원 중심(코 반대편)
+    cv2.line(img, cur[1], hc, level_color, 3, cv2.LINE_AA)  # 목: 가슴 -> 머리 원 중심(얼굴 끝 반대편으로 이어짐)
+    cv2.line(img, cur[1], cur[2], level_color, 3, cv2.LINE_AA)  # 몸통: 가슴 -> 허리
     if arm_pts:  # 팔: 어깨-팔꿈치-손목 (depth가 있는 점만). 왼팔은 하늘색, 오른팔은 분홍
         for tag, col in (("l", (255, 200, 90)), ("r", (200, 120, 255))):
             seq = [arm_pts[f"{tag}_{p}"] for p in ("sh", "el", "wr")]
