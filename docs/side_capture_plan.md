@@ -10,9 +10,10 @@ cd C:\Users\gian\Downloads\aiot_project
 git pull
 ```
 
-## 촬영 명령 (파일명의 참가자·자세만 바꿔 반복, 예: data/side_p01_normal.csv, 각 자세 약 20초 유지, 처음 3초는 자세 잡는 시간, q로 종료)
+## 촬영 명령 (파일명의 참가자·자세만 바꿔 반복, 예: data/side_p01_normal.csv)
+처음 5초는 자세 잡는 시간(기록 안 함), 이어서 20초가 기록되고 자동 종료된다. 중간에 끝내려면 q.
 ```
-python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflite --realsense --judge --log data/side_<참가자>_<자세>.csv
+python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflite --realsense --judge --log data/side_<참가자>_<자세>.csv --countdown 5 --duration 20
 ```
 
 ## A. 단일 자세 (기준값용)

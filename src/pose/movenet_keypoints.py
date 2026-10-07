@@ -643,6 +643,11 @@ def main():
                               "검사해 터미널에 출력한다 (5주차 판정 로직 1차 통합, src/logic/decision.py)")
     parser.add_argument("--no-side-view", action="store_true",
                          help="--judge에서 별도 창에 띄우는 측면 자세 뷰(머리·가슴·허리 depth로 옆에서 본 모습)를 끈다")
+    parser.add_argument("--countdown", type=float, default=0.0,
+                         help="시작 후 이 시간(초) 동안은 자세 잡는 시간으로 보고 --log 기록을 하지 않는다(화면에 카운트다운 표시)")
+    parser.add_argument("--duration", type=float, default=0.0,
+                         help="카운트다운이 끝난 뒤 이 시간(초)이 지나면 자동 종료한다(0이면 q를 누를 때까지). "
+                              "예: --countdown 3 --duration 20")
     parser.add_argument("--sample-interval", type=float, default=5.0,
                          help="--judge에서 알림 상태머신에 샘플을 넣는 주기(초), 기본 5 (project.md 5초 샘플링)")
     args = parser.parse_args()
@@ -757,11 +762,17 @@ def main():
     judge_start_t = time.time()  # [알림] 출력에 경과 초를 붙여 쿨다운(60s/300s)을 로그만으로 확인
 
     print(f"실행 중 (소스: {'RealSense D455' if args.realsense else f'웹캠 index={args.camera}'})... 'q'를 누르면 종료합니다.")
+    run_start_t = time.time()
     try:
         while True:
             frame = source.read()
             if frame is None:
                 continue
+            run_elapsed = time.time() - run_start_t
+            in_countdown = run_elapsed < args.countdown
+            if args.duration > 0 and run_elapsed - args.countdown >= args.duration:
+                print(f"--duration {args.duration:g}초 경과: 자동 종료합니다.")
+                break
 
             combined_mask = None
             if calibrated:
@@ -923,7 +934,7 @@ def main():
                     for alert in alert_machine.update(now, judgement):
                         print(f"[알림 +{now - judge_start_t:6.1f}s] {alert} — {', '.join(judgement.reasons)}")
 
-            if log_writer:
+            if log_writer and not in_countdown:
                 row = [time.time()] + [f"{kp.score:.4f}" for kp in keypoints_raw]
                 if args.realsense:
                     row += [
@@ -956,6 +967,15 @@ def main():
                             (10, frame.shape[0] - 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, status_color, 1, cv2.LINE_AA)
                 cv2.putText(frame, "'s' = 저장, 'n' = 다음 자세, 'r' = 다시 자동 인식, 'q' = 종료", (10, frame.shape[0] - 4),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
+            if args.countdown > 0 or args.duration > 0:  # 촬영 진행 표시
+                if in_countdown:
+                    msg, col = f"GET READY  {args.countdown - run_elapsed:.0f}s (not recording)", (0, 200, 255)
+                elif args.duration > 0:
+                    msg, col = f"REC {run_elapsed - args.countdown:4.1f} / {args.duration:g}s", (0, 0, 255)
+                else:
+                    msg, col = f"REC {run_elapsed - args.countdown:4.1f}s", (0, 0, 255)
+                cv2.putText(frame, msg, (10, frame.shape[0] - 14), cv2.FONT_HERSHEY_SIMPLEX, 0.7, col, 2, cv2.LINE_AA)
 
             cv2.imshow("MoveNet 17 Keypoints (q to quit)", frame)
             key = cv2.waitKey(1) & 0xFF
