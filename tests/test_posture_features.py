@@ -119,11 +119,27 @@ def test_compute_depth_features_reads_head_chest_hip_and_offsets():
     features = compute_depth_features(kps, fake_depth_lookup)
     assert features is not None
     assert features["head_depth_m"] == pytest.approx(0.70)
-    assert features["chest_depth_m"] == pytest.approx(0.80)
+    # 가슴은 어깨 아래 두 지점+양쪽 어깨의 중앙값(선형 가짜 depth라 어깨 중점 0.80보다 약간 멀다)
+    assert features["chest_depth_m"] == pytest.approx(0.825, abs=0.02)
     assert features["hip_depth_m"] == pytest.approx(1.20)
     # 가슴이 머리보다 멀리 있으니(정상 자세) neck_forward_offset_m은 양수여야 한다
-    assert features["neck_forward_offset_m"] == pytest.approx(0.10)
-    assert features["torso_recline_offset_m"] == pytest.approx(0.40)
+    assert features["neck_forward_offset_m"] == pytest.approx(0.125, abs=0.02)
+    assert features["torso_recline_offset_m"] == pytest.approx(0.375, abs=0.02)
+
+
+def test_chest_depth_ignores_face_occluding_shoulder_midpoint():
+    # 앞으로 숙이면 턱·얼굴이 어깨 중점 픽셀을 가린다 -> 그 점만 얼굴 depth(0.35m)로 튄다(10/8 실측)
+    kps = make_symmetric_seated_pose()
+    mid_x = (kps[5].x + kps[6].x) / 2.0
+    mid_y = (kps[5].y + kps[6].y) / 2.0
+
+    def lookup(x, y):
+        if abs(x - mid_x) < 1e-6 and abs(y - mid_y) < 1e-6:
+            return 0.35  # 중점 한 점이 얼굴에 가려짐
+        return 0.60
+
+    features = compute_depth_features(kps, lookup)
+    assert features["chest_depth_m"] == pytest.approx(0.60)
 
 
 def test_compute_depth_features_partial_when_lookup_returns_none_for_some_points():

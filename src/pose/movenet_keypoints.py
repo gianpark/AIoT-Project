@@ -881,7 +881,8 @@ def main():
             arm_ang = {}
             extra = {}
             if depth_lookup is not None:
-                depth_features = compute_depth_features(keypoints, depth_lookup)
+                depth_features = compute_depth_features(keypoints, depth_lookup,
+                                                         frame_aspect=frame.shape[1] / frame.shape[0])
                 if depth_features:
                     for k in DEPTH_FEATURE_KEYS:
                         v = depth_features.get(k)

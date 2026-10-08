@@ -101,10 +101,10 @@ def compute_depth_features(
     depth_lookup: DepthLookup,
     confidence_threshold: float = 0.3,
     hip_confidence_threshold: float = HIP_DEPTH_MIN_SCORE,
+    frame_aspect: float = 640 / 480,
 ) -> Optional[dict]:
     """
-    5주차: 판정 로직과 스테레오+포즈 파이프라인 1차 통합용 — 머리(코)/가슴(양쪽 어깨
-    중점)/허리(양쪽 엉덩이 중점) 세 지점의 실측 depth(m)를 읽고, 그 차이로 "앞으로 숙임
+    5주차: 판정 로직과 스테레오+포즈 파이프라인 1차 통합용 — 머리(코)/가슴(어깨 아래 가슴 영역, 중앙값)/허리(양쪽 엉덩이 중점) 세 지점의 실측 depth(m)를 읽고, 그 차이로 "앞으로 숙임
     (거북목)"과 "뒤로 기댐"을 2D 각도보다 직접적으로 판단할 수 있는 특징을 만든다.
 
     각 keypoint의 confidence가 threshold 미만이거나 depth_lookup이 None을 반환하면
@@ -134,8 +134,23 @@ def compute_depth_features(
             return None
         return depth_lookup((a.x + b.x) / 2.0, (a.y + b.y) / 2.0)
 
+    def _chest_depth() -> Optional[float]:
+        """가슴 depth: 어깨 중점 한 픽셀은 앞으로 숙이면 얼굴(턱)에 가려져 얼굴 depth로 튄다(10/8 실측).
+        그래서 어깨 중점 아래 가슴 두 지점(어깨너비의 0.25·0.5배)과 양쪽 어깨 점, 총 4곳의 중앙값을 쓴다.
+        유효한 샘플이 2개 미만이면 예전처럼 어깨 중점 한 점으로 되돌아간다."""
+        if l_sh.score < confidence_threshold or r_sh.score < confidence_threshold:
+            return None
+        mx, my = (l_sh.x + r_sh.x) / 2.0, (l_sh.y + r_sh.y) / 2.0
+        sw_y = float(np.hypot((l_sh.x - r_sh.x) * frame_aspect, l_sh.y - r_sh.y)) / frame_aspect
+        samples = [depth_lookup(mx, min(my + k * sw_y, 1.0)) for k in (0.25, 0.5)]
+        samples += [depth_lookup(l_sh.x, l_sh.y), depth_lookup(r_sh.x, r_sh.y)]
+        valid = [v for v in samples if v is not None]
+        if len(valid) >= 2:
+            return float(np.median(valid))
+        return depth_lookup(mx, my)
+
     head_depth = _point_depth(nose)
-    chest_depth = _midpoint_depth(l_sh, r_sh)
+    chest_depth = _chest_depth()
     hip_depth = _midpoint_depth(l_hip, r_hip, hip_confidence_threshold)
 
     # 코 confidence는 충분한데 머리 depth만 없으면 얼굴이 D455 최소 유효거리 안쪽(<~0.3m)이라는 뜻이다.
