@@ -29,9 +29,16 @@ PROXIMITY_DEPTH_M = 0.40  # 머리/가슴이 이 거리보다 가까우면 "화�
 RECLINE_BACK_WARN_M = 0.11  # 10/6 로그(1인): 정상 +0.054, 기댐 약 -0.117, 심하게 -0.164 (hip confidence≥0.5일 때만 유효)
 # 허리가 책상에 가려 recline이 자주 빠지므로 머리-가슴 거리 차(neck_forward_offset_m)로도 뒤로 기댐을 본다.
 # 10/6 로그(1인): 정상 0.153, 기댐 0.062, 심하게 ≈0 — 기댈수록 머리가 가슴 거리로 붙는다. 표본(참가자) 늘려 재보정
-NECK_REF_M = 0.15
-NECK_BACK_WARN_M = 0.07
+# 10/8 수집(2인, 자세당 1~3회): 머리-가슴 차 중앙값 normal 0.12~0.16, 기댐(약) 0.07~0.11, 기댐(강) 0.03~0.11,
+# 고개 내밈(약) 0.16~0.21, 고개 내밈(강) 0.21~0.23, 앞숙임·구부정 0.17~0.21. 기댐 경고 0.10, 고개 내밈 경고 0.18로 잠정 확정.
+NECK_REF_M = 0.13  # 이보다 작아지면 기댐 신호 시작(비율 0)
+NECK_BACK_WARN_M = 0.10
 NECK_BACK_MIN_CHEST_M = 0.55
+NECK_OUT_REF_M = 0.15  # 이보다 커지면 고개 내밈 신호 시작
+NECK_OUT_WARN_M = 0.18
+# 턱 괴기: 코에서 가장 가까운 손목까지 거리(어깨너비 단위). 10/8 수집: normal·기댐 1.6 이상, 앞숙임·거북목 1.15 이상, 턱 괴기 0.4~0.55
+CHIN_WRIST_WARN_SW = 0.65
+CHIN_WRIST_REF_SW = 1.2
 RECLINE_WARN_M = 0.10  # torso_recline_offset_m: +면 숙임(엉덩이가 가슴보다 멀다), -면 기댐 (정상 -0.05, 숙임 +0.17, 기댐 -0.16)
 LATERAL_WARN = 0.35  # 어깨 중점이 엉덩이 중점에서 옆으로 벗어난 정도(어깨너비 단위) — 몸통 약 15° 기울임에 해당하는 잠정값
 CAUTION_RATIO = 0.7  # 경고 임계값의 70%부터 "주의"
@@ -77,7 +84,7 @@ def shoulder_width_ratio(keypoints, frame_shape, min_score: float = 0.3) -> Opti
 @dataclass
 class Judgement:
     posture_level: str  # 정상/주의/경고
-    posture_kind: Optional[str]  # slouch_forward / slouch_back / tilt_left / tilt_right / None
+    posture_kind: Optional[str]  # slouch_forward / slouch_back / neck_forward / chin_rest / tilt_left / tilt_right / None
     proximity: bool  # 화면 근접 여부
     reasons: list[str] = field(default_factory=list)
     # 복합 자세: 주의 이상(경고 임계의 70%+)인 모든 문제를 (kind, 비율) 내림차순으로. posture_kind는 이 중 1순위.
@@ -102,8 +109,22 @@ def lateral_offset(keypoints) -> Optional[float]:
     return float((norm[5][0] + norm[6][0]) / 2.0)
 
 
+def wrist_face_distance(keypoints, frame_aspect: float = 640 / 480, min_score: float = 0.3) -> Optional[float]:
+    """코에서 가장 가까운 손목까지의 거리를 어깨너비로 나눈 값(작을수록 손이 얼굴 근처 = 턱 괴기 후보).
+    코·어깨·손목이 하나라도 안 보이면 None. frame_aspect=프레임 너비/높이(정규화 좌표의 가로 보정)."""
+    nose, l_sh, r_sh = keypoints[0], keypoints[5], keypoints[6]
+    if nose.score < min_score or l_sh.score < min_score or r_sh.score < min_score:
+        return None
+    sw = float(np.hypot((l_sh.x - r_sh.x) * frame_aspect, l_sh.y - r_sh.y))
+    if sw < 1e-3:
+        return None
+    ds = [float(np.hypot((w.x - nose.x) * frame_aspect, w.y - nose.y)) / sw
+          for w in (keypoints[9], keypoints[10]) if w.score >= min_score]
+    return min(ds) if ds else None
+
+
 def judge(keypoints, depth_features: Optional[dict],
-          fallback_depth_m: Optional[float] = None) -> Judgement:
+          fallback_depth_m: Optional[float] = None, frame_aspect: float = 640 / 480) -> Judgement:
     """한 샘플의 keypoint + depth 특징으로 자세·근접을 판정한다.
 
     fallback_depth_m: depth가 무효일 때 ProximityEstimator가 RGB 어깨너비로 추정한 거리(m).
@@ -145,6 +166,13 @@ def judge(keypoints, depth_features: Optional[dict],
             and chest is not None and chest >= NECK_BACK_MIN_CHEST_M):
         back = (NECK_REF_M - nf) / (NECK_REF_M - NECK_BACK_WARN_M)
         ratios["slouch_back"] = max(ratios.get("slouch_back", 0.0), back)
+
+    if nf is not None and nf > NECK_OUT_REF_M:
+        ratios["neck_forward"] = (nf - NECK_OUT_REF_M) / (NECK_OUT_WARN_M - NECK_OUT_REF_M)
+
+    wf = wrist_face_distance(keypoints, frame_aspect)
+    if wf is not None and wf < CHIN_WRIST_REF_SW:
+        ratios["chin_rest"] = (CHIN_WRIST_REF_SW - wf) / (CHIN_WRIST_REF_SW - CHIN_WRIST_WARN_SW)
 
     if lat is not None:
         # 이미지 왼쪽(음수)은 참가자 본인 기준 오른쪽 (비반전 영상, project 좌우 규칙)

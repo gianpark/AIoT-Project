@@ -928,7 +928,8 @@ def main():
                     ref_depth = depth_features.get("chest_depth_m") or (valid[0] if valid else None)
                 proximity_estimator.update(sh_w, ref_depth)  # depth 유효 시 k=어깨너비*거리 학습
                 judgement = judge(keypoints, depth_features,
-                                  fallback_depth_m=proximity_estimator.estimate_depth(sh_w))
+                                  fallback_depth_m=proximity_estimator.estimate_depth(sh_w),
+                                  frame_aspect=frame.shape[1] / frame.shape[0])
                 color = {NORMAL: (0, 255, 170), CAUTION: (0, 200, 255), WARNING: (0, 0, 255)}[judgement.posture_level]
                 if args.realsense and not args.no_side_view:
                     from src.pose.side_view import render_side_view

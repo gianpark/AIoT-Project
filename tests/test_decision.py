@@ -134,3 +134,34 @@ def test_issues_lists_all_compound_problems():
     assert "slouch_back" in kinds and any(k.startswith("tilt") for k in kinds)
     assert j.posture_kind == kinds[0]
     assert judge(kps(), depth()).issues == []
+
+
+def test_oct8_back_lean_thresholds():
+    """10/8 수집: 머리-가슴 차 normal 0.12~0.16은 정상, 기댐(약) 0.08은 경고, 0.115는 정상~주의 경계."""
+    base = {"head_depth_m": 0.60, "chest_depth_m": 0.75, "hip_depth_m": None, "torso_recline_offset_m": None}
+    assert judge(kps(), {**base, "neck_forward_offset_m": 0.14}).posture_kind is None
+    assert judge(kps(), {**base, "neck_forward_offset_m": 0.12}).posture_kind is None
+    j = judge(kps(), {**base, "neck_forward_offset_m": 0.08})
+    assert j.posture_level == WARNING and j.posture_kind == "slouch_back"
+
+
+def test_neck_forward_detected_from_head_chest_offset():
+    """10/8: 고개 내밈(약) 머리-가슴 차 0.18~0.21 -> 경고, 정상 0.16 이하는 정상."""
+    base = {"head_depth_m": 0.50, "chest_depth_m": 0.70, "hip_depth_m": None, "torso_recline_offset_m": None}
+    j = judge(kps(), {**base, "neck_forward_offset_m": 0.21})
+    assert j.posture_level == WARNING and j.posture_kind == "neck_forward"
+    assert judge(kps(), {**base, "neck_forward_offset_m": 0.16}).posture_kind is None
+
+
+def test_chin_rest_from_wrist_near_face_and_compound():
+    k = kps()
+    k[10] = Keypoint(name="k10", x=0.52, y=0.30, score=0.9)  # 오른쪽 손목이 코 근처
+    base = {"head_depth_m": 0.60, "chest_depth_m": 0.75, "hip_depth_m": None, "torso_recline_offset_m": None,
+            "neck_forward_offset_m": 0.14}
+    j = judge(k, base)
+    assert j.posture_kind == "chin_rest" and j.posture_level == WARNING
+    # 턱 괴기 + 고개 내밈 복합 자세: issues에 둘 다 남는다
+    j2 = judge(k, {**base, "neck_forward_offset_m": 0.21})
+    kinds = [kk for kk, _ in j2.issues]
+    assert "chin_rest" in kinds and "neck_forward" in kinds
+    assert judge(kps(), base).posture_kind is None  # 손목이 멀면 턱 괴기 아님
