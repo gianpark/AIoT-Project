@@ -29,6 +29,8 @@ data/external_wrf/
 !data/relabel_mapping.csv
 !data/relabel_results.csv
 !data/depth_filter_tuning.csv
+# 10/8~10/9 자세 로그(숫자만, 얼굴 사진 없음) — 팀 분석용
+!data/side_logs/*.csv
 
 # 발표자료 QA용으로 렌더링한 슬라이드 이미지 (pptx에서 다시 뽑으면 됨)
 slide-*.jpg
