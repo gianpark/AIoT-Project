@@ -618,6 +618,10 @@ def main():
     parser.add_argument("--threshold", type=float, default=0.3, help="시각화용 confidence 임계값")
     parser.add_argument("--labels", action="store_true", help="각 keypoint 점 옆에 이름을 표시 (어떤 점이 어떤 keypoint인지 눈으로 확인용)")
     parser.add_argument("--log", type=str, default=None, help="keypoint별 confidence를 저장할 CSV 경로")
+    parser.add_argument("--roi-crop", action="store_true",
+                         help="MoveNet 입력단 수정(방법 D): 직전 프레임 몸 영역으로 크롭해 추론, 주기적으로 전체 프레임 재검색")
+    parser.add_argument("--roi-full-every", type=int, default=30,
+                         help="--roi-crop에서 전체 프레임으로 다시 찾는 주기(프레임), 기본 30")
     parser.add_argument("--participant", type=str, default=None,
                          help="데이터 수집 캡처 모드 활성화 — 참가자 ID (예: p01)")
     parser.add_argument("--label", type=str, default=VALID_LABELS[0], choices=VALID_LABELS,
@@ -698,6 +702,10 @@ def main():
     occlusion_smoother = KeypointOcclusionSmoother(hold_frames=10, confidence_threshold=args.hip_warn_threshold)
 
     extractor = MoveNetExtractor(args.model)
+    roi_tracker = None
+    if args.roi_crop:
+        from src.pose.roi_crop import RoiCropTracker
+        roi_tracker = RoiCropTracker(full_every=args.roi_full_every)
     source = _RealSenseSource(args.fps) if args.realsense else _WebcamSource(args.camera)
 
     log_file = None
@@ -808,7 +816,7 @@ def main():
                     frame[~combined_mask] = 0  # 범위 밖(다른 사람/배경)은 검게 지워 MoveNet이 못 보게 함
 
             raw_frame = frame.copy()  # 저장용 원본 (스켈레톤 안 그려진 상태, 마스킹은 반영됨)
-            keypoints_raw = extractor.infer(frame)
+            keypoints_raw = roi_tracker.infer(extractor.infer, frame) if roi_tracker else extractor.infer(frame)
             # 화면 표시·특징 계산에는 자기 가림 보정을 적용한 값을 쓰고, confidence 로그에는
             # 원본 점수를 그대로 남긴다(보정은 위치만 바꾸고 score는 원본을 유지하긴 하지만,
             # 로그는 항상 extractor가 준 원본 리스트를 기준으로 쓴다).
