@@ -368,6 +368,9 @@ class _WebcamSource:
     def get_depth_lookup(self, frame_shape):
         return None  # 일반 웹캠은 depth가 없음
 
+    def get_depth_image_m(self):
+        return None
+
     def get_foreground_mask(self, min_depth_m: float, max_depth_m: float):
         return None  # 일반 웹캠은 depth가 없어 전경 분리 불가
 
@@ -423,6 +426,12 @@ class _RealSenseSource:
             return d if (min_valid <= d <= max_valid) else None
 
         return _lookup
+
+    def get_depth_image_m(self):
+        """마지막 read() 프레임의 depth 이미지(미터, H×W). 없으면 None."""
+        if self._last_depth_frame is None:
+            return None
+        return self._cam.get_depth_image_m(self._last_depth_frame)
 
     def get_foreground_mask(self, min_depth_m: float, max_depth_m: float):
         """[min_depth_m, max_depth_m] 범위 안에 있는 픽셀만 True인 마스크를 반환한다
@@ -622,6 +631,8 @@ def main():
                          help="MoveNet 입력단 수정(방법 D): 직전 프레임 몸 영역으로 크롭해 추론, 주기적으로 전체 프레임 재검색")
     parser.add_argument("--roi-full-every", type=int, default=30,
                          help="--roi-crop에서 전체 프레임으로 다시 찾는 주기(프레임), 기본 30")
+    parser.add_argument("--depth-refine", action="store_true",
+                         help="MoveNet 출력단 수정(방법 A): 배경 depth에 걸린 코·팔꿈치·손목을 사용자 몸 쪽으로 옮김(--realsense 필요)")
     parser.add_argument("--participant", type=str, default=None,
                          help="데이터 수집 캡처 모드 활성화 — 참가자 ID (예: p01)")
     parser.add_argument("--label", type=str, default=VALID_LABELS[0], choices=VALID_LABELS,
@@ -702,6 +713,7 @@ def main():
     occlusion_smoother = KeypointOcclusionSmoother(hold_frames=10, confidence_threshold=args.hip_warn_threshold)
 
     extractor = MoveNetExtractor(args.model)
+    refine_count = 0  # --depth-refine으로 옮겨진 keypoint 누적 수(진단용)
     roi_tracker = None
     if args.roi_crop:
         from src.pose.roi_crop import RoiCropTracker
@@ -820,6 +832,12 @@ def main():
             # 화면 표시·특징 계산에는 자기 가림 보정을 적용한 값을 쓰고, confidence 로그에는
             # 원본 점수를 그대로 남긴다(보정은 위치만 바꾸고 score는 원본을 유지하긴 하지만,
             # 로그는 항상 extractor가 준 원본 리스트를 기준으로 쓴다).
+            if args.depth_refine and hasattr(source, "get_depth_image_m"):
+                from src.pose.depth_refine import refine_keypoints_with_depth
+                depth_img = source.get_depth_image_m()
+                if depth_img is not None:
+                    keypoints_raw, refined_idx = refine_keypoints_with_depth(keypoints_raw, depth_img)
+                    refine_count += len(refined_idx)
             keypoints = occlusion_smoother.smooth(keypoints_raw)
 
             depth_lookup = source.get_depth_lookup(raw_frame.shape) if hasattr(source, "get_depth_lookup") else None
@@ -1068,6 +1086,8 @@ def main():
     finally:
         source.release()
         cv2.destroyAllWindows()
+        if args.depth_refine:
+            print(f"depth 기반 keypoint 보정: 옮겨진 점 누적 {refine_count}개")
         if log_file:
             log_file.close()
             print(f"confidence 로그 저장 완료: {args.log}")
