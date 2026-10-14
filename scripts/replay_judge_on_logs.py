@@ -37,6 +37,13 @@ def num(v):
     return None if v is None or (isinstance(v, float) and math.isnan(v)) else float(v)
 
 
+def real_keypoints(row) -> list[Keypoint] | None:
+    """10/14 이후 로그에는 keypoint x/y가 있다 → 실제 좌표로 재생(좌우 기울임·손목-얼굴까지 검증 가능)."""
+    if num(row.get("nose_x")) is None:
+        return None
+    return [Keypoint(n, float(row[f"{n}_y"]), float(row[f"{n}_x"]), float(row[f"{n}_score"])) for n in NAMES]
+
+
 def synth_keypoints(row) -> list[Keypoint]:
     """정렬된 몸통 + 코 기준 손목 거리(wrist_face_sw). 어깨너비=0.2, aspect=1로 계산."""
     pos = {"nose": (0.5, 0.3), "left_shoulder": (0.6, 0.5), "right_shoulder": (0.4, 0.5),
@@ -55,7 +62,8 @@ def synth_keypoints(row) -> list[Keypoint]:
 
 def classify(row):
     d = {c: num(row.get(c)) for c in DEPTH_COLS}
-    j = judge(synth_keypoints(row), d, frame_aspect=1.0)
+    real = real_keypoints(row)
+    j = judge(real, d, frame_aspect=640 / 480) if real else judge(synth_keypoints(row), d, frame_aspect=1.0)
     return j.posture_level, j.posture_kind, {k for k, _ in j.issues}
 
 

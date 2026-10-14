@@ -79,3 +79,13 @@ def test_nose_holds_last_good_position_briefly_then_releases():
     # 4번째부터는 hold_frames를 넘겨서 원본(저신뢰) 값으로 돌아가야 한다
     result = smoother.smooth(make_frame({0: (0.9, 0.9, 0.05)}))
     assert result[0].x == 0.9 and result[0].y == 0.9
+
+
+def test_keypoint_xy_log_columns_match_values():
+    from src.pose.movenet_keypoints import KEYPOINT_XY_KEYS, keypoint_xy_values
+    kps = [Keypoint(n, 0.25 + i * 0.01, 0.5 + i * 0.01, 0.9) for i, n in enumerate(KEYPOINT_NAMES)]
+    vals = keypoint_xy_values(kps)
+    assert len(KEYPOINT_XY_KEYS) == len(vals) == 34
+    assert KEYPOINT_XY_KEYS[:2] == ["nose_x", "nose_y"]
+    assert vals[:2] == ["0.5000", "0.2500"]  # x, y 순서
+    assert KEYPOINT_XY_KEYS[-2:] == ["right_ankle_x", "right_ankle_y"]

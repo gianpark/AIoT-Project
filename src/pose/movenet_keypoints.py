@@ -122,6 +122,15 @@ KEYPOINT_NAMES = [
     "left_ankle", "right_ankle",
 ]
 
+# 로그 맨 끝에 붙이는 keypoint 정규화 좌표(0~1) 열 — 좌우 기울임·손목-얼굴 재계산, keypoint 보정 ablation용.
+# 기존 열 순서를 바꾸지 않도록 항상 끝에 둔다(10/14 추가).
+KEYPOINT_XY_KEYS = [f"{name}_{axis}" for name in KEYPOINT_NAMES for axis in ("x", "y")]
+
+
+def keypoint_xy_values(keypoints) -> list[str]:
+    """KEYPOINT_XY_KEYS 순서대로 x,y 문자열(소수 4자리)을 돌려준다."""
+    return [f"{v:.4f}" for kp in keypoints for v in (kp.x, kp.y)]
+
 # 스켈레톤을 그릴 때 이을 keypoint 쌍
 SKELETON_EDGES = [
     (0, 1), (0, 2), (1, 3), (2, 4),          # 얼굴
@@ -700,6 +709,7 @@ def main():
         if args.realsense:
             from src.pose.side_view import ARM_ANGLE_KEYS, EXTRA_KEYS, SIDE_ANGLE_KEYS
             header += DEPTH_FEATURE_KEYS + SIDE_ANGLE_KEYS + ARM_ANGLE_KEYS + EXTRA_KEYS
+        header += KEYPOINT_XY_KEYS
         log_writer.writerow(header)
 
     # 저장된 사진 각각에 대응하는 depth 특징을 같이 남긴다 — RGB 사진(raw_frame)과 달리
@@ -966,6 +976,7 @@ def main():
                         (f"{extra[k]:.3f}" if extra.get(k) is not None else "")
                         for k in ("torso_len_sw", "head_up_m", "wrist_face_sw")
                     ]
+                row += keypoint_xy_values(keypoints_raw)
                 log_writer.writerow(row)
 
             if capture_mode:
