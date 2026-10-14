@@ -31,6 +31,9 @@ data/external_wrf/
 !data/depth_filter_tuning.csv
 # 10/8~10/9 자세 로그(숫자만, 얼굴 사진 없음) — 팀 분석용
 !data/side_logs/*.csv
+# 10/15 이후 MoveNet 수정 전후 비교 로그(숫자만)
+!data/mod_logs/*.csv
+!data/side_gt/*.csv
 
 # 발표자료 QA용으로 렌더링한 슬라이드 이미지 (pptx에서 다시 뽑으면 됨)
 slide-*.jpg
