@@ -91,6 +91,7 @@ DEPTH_FEATURE_KEYS = [
     "head_depth_m", "chest_depth_m", "hip_depth_m",
     "neck_forward_offset_m", "torso_recline_offset_m",
 ]
+COMPARE_VARIANTS = ["base", "roi", "refine", "both"]
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +131,18 @@ KEYPOINT_XY_KEYS = [f"{name}_{axis}" for name in KEYPOINT_NAMES for axis in ("x"
 def keypoint_xy_values(keypoints) -> list[str]:
     """KEYPOINT_XY_KEYS 순서대로 x,y 문자열(소수 4자리)을 돌려준다."""
     return [f"{v:.4f}" for kp in keypoints for v in (kp.x, kp.y)]
+
+
+def compare_header() -> list[str]:
+    """--compare-log의 헤더. timestamp 뒤에 변형(base/roi/refine/both)마다
+    [17점 x·y·score] + DEPTH_FEATURE_KEYS + level 순서로 이어진다."""
+    cols = ["timestamp"]
+    for v in COMPARE_VARIANTS:
+        for n in KEYPOINT_NAMES:
+            cols += [f"{v}_{n}_x", f"{v}_{n}_y", f"{v}_{n}_score"]
+        cols += [f"{v}_{k}" for k in DEPTH_FEATURE_KEYS]
+        cols.append(f"{v}_level")
+    return cols
 
 # 스켈레톤을 그릴 때 이을 keypoint 쌍
 SKELETON_EDGES = [
@@ -633,6 +646,13 @@ def main():
                          help="--roi-crop에서 전체 프레임으로 다시 찾는 주기(프레임), 기본 30")
     parser.add_argument("--depth-refine", action="store_true",
                          help="MoveNet 출력단 수정(방법 A): 배경 depth에 걸린 코·팔꿈치·손목을 사용자 몸 쪽으로 옮김(--realsense 필요)")
+    parser.add_argument("--compare", action="store_true",
+                         help="같은 프레임에 base/roi/refine/both 4가지 경로를 모두 돌려 --compare-log에 기록(--realsense 필요). "
+                              "화면·판정·--log는 base 경로를 쓴다. --roi-crop/--depth-refine과는 함께 쓰지 않는다")
+    parser.add_argument("--overwrite", action="store_true",
+                         help="--compare-log 파일이 이미 있어도 덮어쓴다(기본은 데이터 보호를 위해 거부)")
+    parser.add_argument("--compare-log", type=str, default=None,
+                         help="--compare 결과를 저장할 CSV 경로 (예: data/mod_compare/cmp_p01_normal.csv)")
     parser.add_argument("--participant", type=str, default=None,
                          help="데이터 수집 캡처 모드 활성화 — 참가자 ID (예: p01)")
     parser.add_argument("--label", type=str, default=VALID_LABELS[0], choices=VALID_LABELS,
@@ -680,6 +700,17 @@ def main():
     parser.add_argument("--sample-interval", type=float, default=5.0,
                          help="--judge에서 알림 상태머신에 샘플을 넣는 주기(초), 기본 5 (project.md 5초 샘플링)")
     args = parser.parse_args()
+    if args.compare:
+        if not args.realsense:
+            parser.error("--compare는 --realsense와 함께 써야 합니다")
+        if not args.compare_log:
+            parser.error("--compare에는 --compare-log 경로가 필요합니다")
+        if Path(args.compare_log).exists() and not args.overwrite:
+            parser.error(f"{args.compare_log} 파일이 이미 있습니다(덮어쓰면 기존 촬영이 사라집니다). "
+                         "참가자·자세 이름을 확인하거나, 정말 다시 찍을 때만 --overwrite를 붙이세요")
+        if args.roi_crop or args.depth_refine:
+            print("(--compare 중에는 --roi-crop/--depth-refine을 무시합니다: 화면·판정은 base 경로)")
+            args.roi_crop = args.depth_refine = False
 
     if not Path(args.model).exists():
         raise SystemExit(f"모델 파일을 찾을 수 없습니다: {args.model} (스크립트 상단 docstring 참고)")
@@ -714,10 +745,20 @@ def main():
 
     extractor = MoveNetExtractor(args.model)
     refine_count = 0  # --depth-refine으로 옮겨진 keypoint 누적 수(진단용)
-    roi_tracker = None
+    crop_tracker = None
     if args.roi_crop:
         from src.pose.roi_crop import RoiCropTracker
-        roi_tracker = RoiCropTracker(full_every=args.roi_full_every)
+        crop_tracker = RoiCropTracker(full_every=args.roi_full_every)
+    compare_crop = None
+    compare_file = None
+    compare_writer = None
+    if args.compare:
+        from src.pose.roi_crop import RoiCropTracker
+        compare_crop = RoiCropTracker(full_every=args.roi_full_every)
+        Path(args.compare_log).parent.mkdir(parents=True, exist_ok=True)
+        compare_file = open(args.compare_log, "w", newline="", encoding="utf-8")
+        compare_writer = csv.writer(compare_file)
+        compare_writer.writerow(compare_header())
     source = _RealSenseSource(args.fps) if args.realsense else _WebcamSource(args.camera)
 
     log_file = None
@@ -828,7 +869,19 @@ def main():
                     frame[~combined_mask] = 0  # 범위 밖(다른 사람/배경)은 검게 지워 MoveNet이 못 보게 함
 
             raw_frame = frame.copy()  # 저장용 원본 (스켈레톤 안 그려진 상태, 마스킹은 반영됨)
-            keypoints_raw = roi_tracker.infer(extractor.infer, frame) if roi_tracker else extractor.infer(frame)
+            keypoints_raw = crop_tracker.infer(extractor.infer, frame) if crop_tracker else extractor.infer(frame)
+            cmp_variants = None
+            if args.compare:
+                # 같은 프레임·같은 depth로 4가지 경로를 돌린다. 화면·판정은 아래에서 base(keypoints_raw)를 계속 쓴다.
+                from src.pose.depth_refine import refine_keypoints_with_depth
+                cmp_depth = source.get_depth_image_m()
+                roi_kp = compare_crop.infer(extractor.infer, frame)
+                if cmp_depth is not None:
+                    ref_base, _ = refine_keypoints_with_depth(keypoints_raw, cmp_depth)
+                    ref_roi, _ = refine_keypoints_with_depth(roi_kp, cmp_depth)
+                else:
+                    ref_base, ref_roi = keypoints_raw, roi_kp
+                cmp_variants = {"base": keypoints_raw, "roi": roi_kp, "refine": ref_base, "both": ref_roi}
             # 화면 표시·특징 계산에는 자기 가림 보정을 적용한 값을 쓰고, confidence 로그에는
             # 원본 점수를 그대로 남긴다(보정은 위치만 바꾸고 score는 원본을 유지하긴 하지만,
             # 로그는 항상 extractor가 준 원본 리스트를 기준으로 쓴다).
@@ -983,6 +1036,21 @@ def main():
                     for alert in alert_machine.update(now, judgement):
                         print(f"[알림 +{now - judge_start_t:6.1f}s] {alert} — {', '.join(judgement.reasons)}")
 
+            if compare_writer is not None and cmp_variants is not None and not in_countdown and depth_lookup is not None:
+                aspect = frame.shape[1] / frame.shape[0]
+                crow = [f"{time.time():.4f}"]
+                for vname in COMPARE_VARIANTS:
+                    kps = cmp_variants[vname]
+                    for kp in kps:
+                        crow += [f"{kp.x:.4f}", f"{kp.y:.4f}", f"{kp.score:.4f}"]
+                    dfv = compute_depth_features(kps, depth_lookup, frame_aspect=aspect)
+                    crow += [(f"{dfv[k]:.4f}" if dfv and dfv.get(k) is not None else "") for k in DEPTH_FEATURE_KEYS]
+                    try:
+                        crow.append(judge(kps, dfv, frame_aspect=aspect).posture_level)
+                    except Exception:
+                        crow.append("")
+                compare_writer.writerow(crow)
+
             if log_writer and not in_countdown:
                 row = [time.time()] + [f"{kp.score:.4f}" for kp in keypoints_raw]
                 if args.realsense:
@@ -1088,6 +1156,9 @@ def main():
         cv2.destroyAllWindows()
         if args.depth_refine:
             print(f"depth 기반 keypoint 보정: 옮겨진 점 누적 {refine_count}개")
+        if compare_file:
+            compare_file.close()
+            print(f"비교 로그 저장 완료: {args.compare_log}")
         if log_file:
             log_file.close()
             print(f"confidence 로그 저장 완료: {args.log}")

@@ -89,3 +89,13 @@ def test_keypoint_xy_log_columns_match_values():
     assert KEYPOINT_XY_KEYS[:2] == ["nose_x", "nose_y"]
     assert vals[:2] == ["0.5000", "0.2500"]  # x, y 순서
     assert KEYPOINT_XY_KEYS[-2:] == ["right_ankle_x", "right_ankle_y"]
+
+
+def test_compare_header_layout():
+    from src.pose.movenet_keypoints import COMPARE_VARIANTS, DEPTH_FEATURE_KEYS, KEYPOINT_NAMES, compare_header
+    h = compare_header()
+    per_variant = len(KEYPOINT_NAMES) * 3 + len(DEPTH_FEATURE_KEYS) + 1
+    assert len(h) == 1 + per_variant * len(COMPARE_VARIANTS)
+    assert h[0] == "timestamp"
+    assert h[1] == "base_nose_x" and h[-1] == "both_level"
+    assert len(set(h)) == len(h)
