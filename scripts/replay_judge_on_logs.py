@@ -115,7 +115,7 @@ def main() -> None:
           "| 자세 | 기대 kind | 1순위 | issues 포함 |", "|---|---|---|---|"]
     L += [f"| {p} | {e} | {t:.1f} | {i:.1f} |" for p, e, t, i in hit]
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
-    open(a.out, "w").write("\n".join(L) + "\n")
+    open(a.out, "w", encoding="utf-8").write("\n".join(L) + "\n")
     print("\n".join(L))
 
 

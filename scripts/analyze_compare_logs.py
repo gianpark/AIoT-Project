@@ -81,11 +81,14 @@ def main():
     folder = sys.argv[1] if len(sys.argv) > 1 else "data/mod_compare"
     rows = []
     for f in sorted(glob.glob(os.path.join(folder, "cmp_*.csv"))):
-        m = re.match(r"cmp_(p\d+)_(.+)\.csv", os.path.basename(f))
+        m = re.match(r"cmp_(p\d+)_(.+?)(?:_r(\d))?\.csv", os.path.basename(f))
         if not m:
             continue
+        if sum(1 for _ in open(f, encoding="utf-8")) < 21:  # 헤더 + 20행 미만(중단된 촬영)은 제외
+            print("건너뜀(행 부족):", os.path.basename(f))
+            continue
         for r in per_file(f):
-            rows.append({"p": m[1], "pose": m[2], **r})
+            rows.append({"p": m[1], "pose": m[2], "round": int(m[3] or 1), **r})
     if not rows:
         print("cmp_*.csv가 없습니다:", folder)
         return

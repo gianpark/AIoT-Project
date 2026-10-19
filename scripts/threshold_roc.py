@@ -100,7 +100,7 @@ def main() -> None:
                          f"{g[g.pose.isin(pos)][s].median():.3f} | {g[g.pose.isin(neg)][s].median():.3f} |"))
         L += [t for _, t in sorted(rows, key=lambda z: -(z[0] if z[0] == z[0] else 0))] + [""]
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
-    open(a.out, "w").write("\n".join(L) + "\n")
+    open(a.out, "w", encoding="utf-8").write("\n".join(L) + "\n")
     print("\n".join(L))
 
 
