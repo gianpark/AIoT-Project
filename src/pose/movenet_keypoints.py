@@ -146,6 +146,19 @@ def compare_header() -> list[str]:
         cols.append(f"{v}_level")
     return cols
 
+def teacher_header() -> list[str]:
+    """--teacher-log의 헤더(학습형 keypoint 보정기용 데이터).
+    timestamp + Lightning 17점(x,y,score) + Thunder 17점(x,y,score) + Lightning 점 위치의 depth(m) 17개
+    + DEPTH_FEATURE_KEYS(Lightning 기준). 얼굴 이미지는 저장하지 않는다."""
+    cols = ["timestamp"]
+    for tag in ("lt", "th"):
+        for n in KEYPOINT_NAMES:
+            cols += [f"{tag}_{n}_x", f"{tag}_{n}_y", f"{tag}_{n}_score"]
+    cols += [f"depth_at_{n}" for n in KEYPOINT_NAMES]
+    cols += list(DEPTH_FEATURE_KEYS)
+    return cols
+
+
 # 스켈레톤을 그릴 때 이을 keypoint 쌍
 SKELETON_EDGES = [
     (0, 1), (0, 2), (1, 3), (2, 4),          # 얼굴
@@ -701,7 +714,22 @@ def main():
                          help="--snap-every 저장 폴더 (기본: data/snaps/<--log 파일 이름>)")
     parser.add_argument("--sample-interval", type=float, default=5.0,
                          help="--judge에서 알림 상태머신에 샘플을 넣는 주기(초), 기본 5 (project.md 5초 샘플링)")
+    parser.add_argument("--teacher-model", type=str, default=None,
+                         help="같은 프레임에 이 모델(예: MoveNet Thunder .tflite)도 돌려 --teacher-log에 숫자만 기록(--realsense 필요). "
+                              "학습형 keypoint 보정기의 정답(teacher) 데이터용. 화면·판정은 --model 결과를 그대로 쓴다")
+    parser.add_argument("--teacher-log", type=str, default=None,
+                         help="--teacher-model 결과를 저장할 CSV 경로 (예: data/teacher_logs/th_p04_normal.csv)")
     args = parser.parse_args()
+    if args.teacher_model or args.teacher_log:
+        if not (args.teacher_model and args.teacher_log):
+            parser.error("--teacher-model과 --teacher-log는 함께 써야 합니다")
+        if not args.realsense:
+            parser.error("--teacher-model은 --realsense와 함께 써야 합니다(depth 열 기록)")
+        if not Path(args.teacher_model).exists():
+            parser.error(f"teacher 모델 파일을 찾을 수 없습니다: {args.teacher_model}")
+        if Path(args.teacher_log).exists() and not args.overwrite:
+            parser.error(f"{args.teacher_log} 파일이 이미 있습니다(덮어쓰면 기존 촬영이 사라집니다). "
+                         "이름을 확인하거나 다시 찍을 때만 --overwrite를 붙이세요")
     if args.compare:
         if not args.realsense:
             parser.error("--compare는 --realsense와 함께 써야 합니다")
@@ -761,6 +789,14 @@ def main():
         compare_file = open(args.compare_log, "w", newline="", encoding="utf-8")
         compare_writer = csv.writer(compare_file)
         compare_writer.writerow(compare_header())
+    teacher_extractor = teacher_file = teacher_writer = None
+    teacher_count = 0
+    if args.teacher_model:
+        teacher_extractor = MoveNetExtractor(args.teacher_model)
+        Path(args.teacher_log).parent.mkdir(parents=True, exist_ok=True)
+        teacher_file = open(args.teacher_log, "w", newline="", encoding="utf-8")
+        teacher_writer = csv.writer(teacher_file)
+        teacher_writer.writerow(teacher_header())
     source = _RealSenseSource(args.fps) if args.realsense else _WebcamSource(args.camera)
 
     log_file = None
@@ -874,6 +910,7 @@ def main():
 
             raw_frame = frame.copy()  # 저장용 원본 (스켈레톤 안 그려진 상태, 마스킹은 반영됨)
             keypoints_raw = crop_tracker.infer(extractor.infer, frame) if crop_tracker else extractor.infer(frame)
+            teacher_kp = teacher_extractor.infer(frame) if teacher_extractor else None
             cmp_variants = None
             if args.compare:
                 # 같은 프레임·같은 depth로 4가지 경로를 돌린다. 화면·판정은 아래에서 base(keypoints_raw)를 계속 쓴다.
@@ -1055,6 +1092,19 @@ def main():
                         crow.append("")
                 compare_writer.writerow(crow)
 
+            if teacher_writer is not None and teacher_kp is not None and not in_countdown and depth_lookup is not None:
+                trow = [f"{time.time():.4f}"]
+                for kps in (keypoints_raw, teacher_kp):
+                    for kp in kps:
+                        trow += [f"{kp.x:.4f}", f"{kp.y:.4f}", f"{kp.score:.4f}"]
+                for kp in keypoints_raw:
+                    dv = depth_lookup(kp.x, kp.y) if kp.score >= 0.1 else None
+                    trow.append(f"{dv:.4f}" if dv is not None else "")
+                dft = compute_depth_features(keypoints_raw, depth_lookup, frame_aspect=frame.shape[1] / frame.shape[0])
+                trow += [(f"{dft[k]:.4f}" if dft and dft.get(k) is not None else "") for k in DEPTH_FEATURE_KEYS]
+                teacher_writer.writerow(trow)
+                teacher_count += 1
+
             if log_writer and not in_countdown:
                 row = [time.time()] + [f"{kp.score:.4f}" for kp in keypoints_raw]
                 if args.realsense:
@@ -1165,6 +1215,9 @@ def main():
         cv2.destroyAllWindows()
         if args.depth_refine:
             print(f"depth 기반 keypoint 보정: 옮겨진 점 누적 {refine_count}개")
+        if teacher_file:
+            teacher_file.close()
+            print(f"teacher 로그 저장 완료: {args.teacher_log} ({teacher_count}행)")
         if compare_file:
             compare_file.close()
             print(f"비교 로그 저장 완료: {args.compare_log}")

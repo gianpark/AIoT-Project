@@ -99,3 +99,14 @@ def test_compare_header_layout():
     assert h[0] == "timestamp"
     assert h[1] == "base_nose_x" and h[-1] == "both_level"
     assert len(set(h)) == len(h)
+
+
+def test_teacher_header_layout():
+    from src.pose.movenet_keypoints import DEPTH_FEATURE_KEYS, KEYPOINT_NAMES, teacher_header
+    h = teacher_header()
+    assert h[0] == "timestamp"
+    assert len(h) == 1 + 2 * 17 * 3 + 17 + len(DEPTH_FEATURE_KEYS)
+    assert h[1] == f"lt_{KEYPOINT_NAMES[0]}_x"
+    assert h[1 + 17 * 3] == f"th_{KEYPOINT_NAMES[0]}_x"
+    assert h[-len(DEPTH_FEATURE_KEYS):] == list(DEPTH_FEATURE_KEYS)
+    assert len(set(h)) == len(h)

@@ -32,6 +32,16 @@ python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflit
 - **normal은 앉는 거리를 바꿔 2번**(`side_p04_normal.csv`, `side_p04_normal_r2.csv`). 지난번 일반화에서 normal recall이 거의 0이었던 원인을 보려는 것이라 normal을 충분히 모은다.
 - 촬영 후: 새 로그 `rf_2d_baseline`을 다시 돌린다(참가자 수가 늘면 LOPO로 확장).
 
+## 2-1. Thunder 동시 기록 (학습형 보정기 데이터, 신규)
+
+촬영 명령에 아래 두 옵션만 붙이면 Lightning과 Thunder 키포인트를 같은 프레임에서 숫자로 함께 기록한다(얼굴 이미지는 저장 안 함).
+```
+--teacher-model models/movenet_thunder_int8.tflite --teacher-log data/teacher_logs/th_<참가자>_<자세>.csv
+```
+- Thunder 파일은 아직 `models/`에 없다. 입력 256px, 출력 [1,1,17,3]로 Lightning과 같다. 공식 배포 주소(TF Hub, 갱신 2024-03): `https://tfhub.dev/google/lite-model/movenet/singlepose/thunder/tflite/int8/4?lite-format=tflite`
+- 두 모델을 같이 돌리면 fps가 떨어질 수 있다. 시작 때 5초 시험으로 fps를 보고, 너무 낮으면 `--judge` 없이 찍는다.
+- 열: timestamp, Lightning 17점(x,y,score), Thunder 17점, Lightning 점 위치 depth 17개, 깊이 특징 5개(총 125열). 같은 파일명이 있으면 거부(`--overwrite`로만 덮어씀).
+
 ## 3. 측면 정답 비교 (checklist_1015 §2) — 30분
 
 - 휴대폰 삼각대를 사용자 정확히 옆, 어깨 높이. 어깨 끝과 코끝에 스티커.
