@@ -134,6 +134,8 @@ def compute_depth_features(
             return None
         return depth_lookup((a.x + b.x) / 2.0, (a.y + b.y) / 2.0)
 
+    chest_raw: dict = {}  # ablation용: 가슴 depth 후보 5개(원본값)를 로그로 남긴다
+
     def _chest_depth() -> Optional[float]:
         """가슴 depth: 어깨 중점 한 픽셀은 앞으로 숙이면 얼굴(턱)에 가려져 얼굴 depth로 튄다(10/8 실측).
         그래서 어깨 중점 아래 가슴 두 지점(어깨너비의 0.25·0.5배)과 양쪽 어깨 점, 총 4곳의 중앙값을 쓴다.
@@ -144,10 +146,13 @@ def compute_depth_features(
         sw_y = float(np.hypot((l_sh.x - r_sh.x) * frame_aspect, l_sh.y - r_sh.y)) / frame_aspect
         samples = [depth_lookup(mx, min(my + k * sw_y, 1.0)) for k in (0.25, 0.5)]
         samples += [depth_lookup(l_sh.x, l_sh.y), depth_lookup(r_sh.x, r_sh.y)]
+        chest_raw.update(zip(("chest_c25_m", "chest_c50_m", "chest_lsh_m", "chest_rsh_m"), samples))
+        single = depth_lookup(mx, my)
+        chest_raw["chest_mid_m"] = single
         valid = [v for v in samples if v is not None]
         if len(valid) >= 2:
             return float(np.median(valid))
-        return depth_lookup(mx, my)
+        return single
 
     head_depth = _point_depth(nose)
     chest_depth = _chest_depth()
@@ -177,4 +182,5 @@ def compute_depth_features(
         ),
         "torso_recline_offset_m": recline,
         "near_invalid": near_invalid,
+        **chest_raw,
     }

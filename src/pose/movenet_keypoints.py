@@ -91,6 +91,8 @@ DEPTH_FEATURE_KEYS = [
     "head_depth_m", "chest_depth_m", "hip_depth_m",
     "neck_forward_offset_m", "torso_recline_offset_m",
 ]
+# ablation용: 가슴 depth 후보 원본값(어깨 중점 한 점, 가슴 아래 0.25·0.5, 좌·우 어깨). --log 끝에 덧붙는다.
+CHEST_RAW_KEYS = ["chest_mid_m", "chest_c25_m", "chest_c50_m", "chest_lsh_m", "chest_rsh_m"]
 COMPARE_VARIANTS = ["base", "roi", "refine", "both"]
 
 
@@ -771,6 +773,8 @@ def main():
             from src.pose.side_view import ARM_ANGLE_KEYS, EXTRA_KEYS, SIDE_ANGLE_KEYS
             header += DEPTH_FEATURE_KEYS + SIDE_ANGLE_KEYS + ARM_ANGLE_KEYS + EXTRA_KEYS
         header += KEYPOINT_XY_KEYS
+        if args.realsense:
+            header += CHEST_RAW_KEYS
         log_writer.writerow(header)
 
     # 저장된 사진 각각에 대응하는 depth 특징을 같이 남긴다 — RGB 사진(raw_frame)과 달리
@@ -1071,6 +1075,11 @@ def main():
                         for k in ("torso_len_sw", "head_up_m", "wrist_face_sw")
                     ]
                 row += keypoint_xy_values(keypoints_raw)
+                if args.realsense:
+                    row += [
+                        (f"{depth_features[k]:.4f}" if depth_features and depth_features.get(k) is not None else "")
+                        for k in CHEST_RAW_KEYS
+                    ]
                 log_writer.writerow(row)
 
             if capture_mode:
