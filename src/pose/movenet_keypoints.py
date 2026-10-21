@@ -802,6 +802,7 @@ def main():
     log_file = None
     log_writer = None
     if args.log:
+        Path(args.log).parent.mkdir(parents=True, exist_ok=True)
         log_file = open(args.log, "w", newline="", encoding="utf-8")
         log_writer = csv.writer(log_file)
         header = ["timestamp"] + [f"{name}_score" for name in KEYPOINT_NAMES]
