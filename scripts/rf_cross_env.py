@@ -19,7 +19,7 @@ MERGE = {"back_light": "back", "back_hard": "back", "neck_light": "neck", "neck_
 
 def fit_eval(tr, te, cols, seed=0):
     Xtr, ytr, Xte, yte, _ = prep(tr, te, cols, "A")
-    rf = RandomForestClassifier(300, class_weight="balanced", random_state=seed, n_jobs=-1).fit(Xtr, ytr)
+    rf = RandomForestClassifier(int(os.environ.get('RF_TREES', 300)), class_weight="balanced", random_state=seed, n_jobs=-1).fit(Xtr, ytr)
     pr = rf.predict(Xte)
     return f1_score(yte, pr, average="macro"), (pr == yte).mean(), yte, pr
 
