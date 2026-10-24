@@ -1,201 +1,123 @@
-# Experiment Results Analysis — Seonwoo
+# 실험 결과 분석 초안 — 선우 담당
+작성 기준: `AIoT-Project-master.zip` 내부의 `paper/experiment_section_outline.md` 및 `experiments/*.md`
+목적: 기존 실험을 논문용 표·서술로 정리하고, 공정한 비교 실험 계획을 세운다.
 
-## 1. Purpose
+## 1. 현재 결론 요약
 
-This document summarizes the existing experimental results of the desk posture monitoring system and proposes additional model comparison experiments for the research paper.
+1. **깊이 측정**: 줄자 실측 거리 37–92 cm에서 기록된 최대 오차는 1.63%이다. 이는 해당 거리와 실험 조건에서의 결과이며, 40 cm 이하 근거리 구간까지 보장하지 않는다.
+2. **규칙 기반 판정**: 재생 로그 32,925프레임에서 정상 자세의 경고 오탐은 모든 5개 로그 묶음에서 0%였다. 다만 정상 자세의 주의 이상 판정은 일부 묶음에서 0.7–1.2% 발생했다.
+3. **RF 분류**: 9개 자세, 참가자 3명(p01–p03)의 LOPO 결과에서 `no_hip` 특징 세트와 결측 처리 A의 Macro-F1 평균은 0.667이다. `all`은 0.659, `depth`는 0.553이다. 엉덩이 depth 특징의 결측 문제 때문에 `no_hip`가 실용적인 후보지만, 참가자 수가 3명뿐이라 일반화 성능을 확정할 수 없다.
+4. **RF 경량화**: 9클래스 실험에서 경량 RF는 기준 RF보다 Macro-F1이 0.003 낮았지만, 모델 크기와 추론시간이 크게 감소했다. 이 결과는 경량화의 유망한 근거이나, 정확도 차이의 통계적 유의성을 주장할 수는 없다.
+5. **MoveNet 수정**: ROI는 엉덩이 keypoint 결측률을 낮추는 대신 손목 jitter와 좌표 이동을 키우는 경향이 있다. 따라서 ROI가 전반적으로 성능을 개선했다고 쓰면 안 된다. Refine 단독은 전체 지표에서 뚜렷한 이득이 확인되지 않았다.
+6. **핵심 한계**: 참가자 수, 촬영 환경 수, 일부 클래스의 결측 및 혼동, 연속 프레임 간 상관관계가 제한점이다.
 
-The main objectives are:
-- Organize the existing experimental results.
-- Compare model performance and computational efficiency.
-- Identify limitations and additional experiments.
-- Provide evidence for the experiment and results sections of the paper.
+## 2. 논문용 표 초안
 
-## 2. Summary of Existing Experiments
+### Table 1. 참가자 단위 RF 분류 결과 (9개 자세)
 
-### 2.1 Depth Measurement
+| 특징 세트 | 결측 처리 | p01 Macro-F1 | p02 Macro-F1 | p03 Macro-F1 | 평균 Macro-F1 | 평가 프레임 유지율 |
+|---|---|---:|---:|---:|---:|---|
+| depth | A | 0.524 | 0.536 | 0.598 | 0.553 | 100% / 100% / 100% |
+| depth | B | 0.635 | 0.536 | 0.648 | 0.607 | 27% / 41% / 60% |
+| no_hip | A | 0.729 | 0.669 | 0.603 | **0.667** | 100% / 100% / 100% |
+| no_hip | B | 0.612 | 0.609 | 0.599 | 0.607 | 54% / 65% / 89% |
+| all | A | 0.699 | 0.649 | 0.631 | 0.659 | 100% / 100% / 100% |
+| all | B | 0.739 | 0.541 | 0.556 | 0.612 | 19% / 29% / 59% |
+| relative | A | 0.595 | 0.532 | 0.525 | 0.551 | 100% / 100% / 100% |
+| relative | B | 0.579 | 0.524 | 0.553 | 0.552 | 54% / 65% / 89% |
 
-The depth measurement experiment reported a maximum error of 1.63% over the tested distance range of approximately 37–92 cm.
+**표 해석:** 결측 처리 A(결측 플래그와 중앙값 대치)는 평가 프레임을 모두 유지했다. 결측 프레임을 제외하는 B는 일부 특징 세트에서 평가 프레임을 크게 줄였다. `no_hip + A`가 평균 Macro-F1 0.667로 가장 높았으며, `all + A`의 0.659보다 0.008 높았다. 현재 결과만으로 차이가 유의하다고 단정하지 않는다.
 
-This result provides preliminary evidence that depth measurements can be used as an input to the posture monitoring system under the tested conditions.
+### Table 2. 9클래스 RF 모델 효율 비교
 
-The result should not be generalized to all distances or environments without additional validation.
+| 모델 | Macro-F1 (평균 ± 폴드 표준편차) | 정확도 | 모델 크기 (KB) | 추론 중앙값 (ms) | 추론 p95 (ms) | 학습 시간 (s) |
+|---|---:|---:|---:|---:|---:|---:|
+| Baseline RF | 0.667 ± 0.051 | 0.689 | 23,806 | 13.54 | 20.29 | 0.9 |
+| Lightweight RF | 0.664 ± 0.031 | 0.684 | 2,249 | 3.01 | 4.38 | 0.3 |
+| Tuned RF | 0.653 ± 0.047 | 0.670 | 2,989 | 8.50 | 14.46 | 0.6 |
 
-### 2.2 Rule-Based Posture Judgment
+**계산된 비교:** 경량 RF는 기준 RF 대비 모델 크기가 약 90.6% 감소했고, 추론 중앙값은 약 77.8% 감소했다(13.54 ms → 3.01 ms). Macro-F1 차이는 −0.003이다. 즉, 이 실험에서는 큰 성능 저하 없이 추론 비용을 줄였을 가능성이 있다. 다만 세 참가자 폴드만으로 통계적 동등성이나 일반화를 주장하지 않는다.
 
-Across five logs containing 32,925 frames, the rule-based system reported no warning-level false positives for normal posture.
+**주의:** `rf_lopo_merged.md`와 `rf_tuning_merged.md`는 7클래스(강도 합침) 결과다. 위 표의 9클래스 결과와 한 표에 섞으면 안 된다. 7클래스 결과는 별도 실험으로 제시하거나 최종 라벨 체계를 정한 뒤 재실행해 일관성을 확보한다.
 
-However, some logs showed caution-or-higher judgments for normal posture at rates of approximately 0.7–1.2%.
+### Table 3. 동일 프레임에서의 MoveNet 수정 비교
 
-This indicates that the judgment thresholds should be evaluated for both sensitivity to incorrect posture and stability during normal posture.
+| 조건 | FPS | 손목 유효 비율 | 엉덩이 결측률 | 어깨 jitter | 손목 jitter | 경고 비율 | 정상 비율 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Base | 25.196 | 0.863 | 0.487 | 12.138 | 11.722 | 0.598 | 0.203 |
+| ROI | 25.196 | 0.814 | 0.106 | 12.851 | 17.010 | 0.720 | 0.136 |
+| Refine | 25.196 | 0.863 | 0.487 | 12.138 | 12.812 | 0.598 | 0.203 |
+| ROI + Refine | 25.196 | 0.814 | 0.106 | 12.851 | 17.606 | 0.720 | 0.136 |
 
-### 2.3 Random Forest Feature Comparison
+*주의: 이 표는 `compare_results.md`의 집계값이다. FPS가 동일하게 기록돼 있어 조건별 실제 추론 비용 비교로 해석하지 말고, 이 로그에서는 좌표/결측/판정 결과 중심으로 비교한다. `mod_compare.md`는 참가자 1명의 예비 실험이므로 별도 취급한다.*
 
-The nine-class Leave-One-Participant-Out (LOPO) experiment reported the following Macro-F1 scores:
+**표 해석:** ROI는 엉덩이 결측률을 0.487에서 0.106으로 낮췄지만, 손목 유효 비율은 0.863에서 0.814로 낮아졌고 손목 jitter는 11.722에서 17.010으로 증가했다. 경고 비율도 0.598에서 0.720으로 증가했다. 이는 keypoint 일부의 가용성이 좋아졌더라도 좌표 이동 및 판정 분포가 달라질 수 있음을 보여준다. 실제 판정 정확도가 좋아졌는지는 정답 keypoint 또는 독립적인 자세 라벨과 대조해야 한다.
 
-| Feature configuration | Macro-F1 |
-|---|---:|
-| no_hip with missing-data treatment A | 0.667 |
-| all | 0.659 |
-| depth | 0.553 |
+### Table 4. 규칙 기반 판정의 대표 결과
 
-The `no_hip` configuration performed best among these tested configurations.
+| 자세 | 기대 판정 | 기대 판정 검출률(%) | 복합 판정 포함(%) |
+|---|---|---:|---:|
+| back_hard | slouch_back | 89.7 | 89.7 |
+| back_light | slouch_back | 94.7 | 94.7 |
+| neck_hard | neck_forward | 96.9 | 96.9 |
+| neck_light | neck_forward | 66.2 | 66.2 |
+| forward | neck_forward | 76.9 | 93.2 |
+| slouch | neck_forward | 88.6 | 88.7 |
+| chin | chin_rest | 28.1 | 49.1 |
 
-However, the experiment included only three participants. The result should therefore be interpreted as preliminary evidence rather than proof of generalization to a wider population.
+정상 자세는 5개 로그 묶음에서 경고 오탐률 0%였으나, 턱 괴기 검출률은 낮았다. 로그 분석에서는 손목-얼굴 신호의 결측이 약 40%로 기록되어, 턱 괴기 검출 개선에는 손목 keypoint의 신뢰도와 결측 처리 개선이 중요하다.
 
-### 2.4 Random Forest Efficiency Comparison
+## 3. 논문에 넣을 수 있는 결과 서술 초안
 
-| Model | Macro-F1 | Model size | Median inference time | P95 inference time |
-|---|---:|---:|---:|---:|
-| Baseline RF | 0.667 | 23,806 KB | 13.54 ms | 20.29 ms |
-| Lightweight RF | 0.664 | 2,249 KB | 3.01 ms | 4.38 ms |
-| Tuned RF | 0.653 | 2,989 KB | 8.50 ms | 14.46 ms |
+### 3.1 RF 분류 성능 및 결측 처리
 
-Compared with the baseline RF, the lightweight RF reduced model size by approximately 90.6% and median inference time by approximately 77.8%.
+참가자 단위 교차검증에서 9개 자세를 분류한 결과, 결측값을 플래그와 중앙값 대치로 처리한 `no_hip` 특징 세트가 평균 Macro-F1 0.667을 기록하였다. 이는 깊이 관련 특징만 사용한 `depth` 세트의 0.553보다 높았다. 반면 모든 특징을 사용한 `all` 세트는 0.659로, `no_hip`보다 소폭 낮았다. 특히 엉덩이 깊이값은 책상 가림 등의 영향으로 유효하지 않은 경우가 있어, 특징을 추가하는 것이 항상 성능 향상으로 이어지지는 않았다. 결측 프레임을 제외하는 방식은 일부 조건에서 평가 가능한 프레임 수를 크게 감소시켰다. 다만 참가자가 3명으로 제한되므로, 이 결과는 예비적 비교로 해석해야 한다.
 
-Its Macro-F1 decreased from 0.667 to 0.664, a difference of 0.003.
+### 3.2 RF 경량화와 추론 효율
 
-These results suggest that the lightweight RF is a promising candidate when inference efficiency and model size are important. The final choice should consider both classification performance and computational cost.
+기준 RF의 Macro-F1은 0.667이었으며, 경량 RF는 0.664를 기록하였다. 경량 RF의 모델 크기는 23,806 KB에서 2,249 KB로 약 90.6% 감소했고, 추론 중앙값은 13.54 ms에서 3.01 ms로 약 77.8% 감소하였다. 따라서 현재 실험에서는 분류 성능의 소폭 감소와 함께 모델 저장 공간 및 추론 비용이 크게 줄어드는 경향이 관찰되었다. 다만 제한된 참가자 수와 폴드 수를 고려할 때, 성능 차이의 통계적 유의성이나 새로운 사용자에 대한 일반화는 추가 검증이 필요하다.
 
-### 2.5 MoveNet ROI Experiment
+### 3.3 ROI 및 키포인트 보정 효과
 
-The ROI experiment reported the following changes:
+동일 프레임 기반 비교에서 ROI 적용은 엉덩이 키포인트 결측률을 줄였지만, 손목 유효 비율과 손목 좌표 안정성은 악화되는 경향을 보였다. 또한 경고 판정 비율이 증가하고 정상 판정 비율이 감소하였다. 따라서 ROI는 모든 관절과 판정 성능을 일괄적으로 개선하는 기법으로 보기 어렵고, 관심영역 설정에 따라 특정 관절의 검출과 다른 관절의 좌표 안정성 사이에 상충관계가 발생할 수 있다. Refine 단독 조건은 집계 지표에서 명확한 이득을 보이지 않았다. 이후에는 관절별 오차, 자세별 검출률, 정상 자세 오탐률을 함께 사용해 수정 효과를 평가해야 한다.
 
-| Metric | Before ROI | With ROI |
-|---|---:|---:|
-| Hip keypoint missing rate | 0.487 | 0.106 |
-| Wrist valid rate | 0.863 | 0.814 |
-| Wrist jitter | 11.722 | 17.010 |
-| Warning ratio | 0.598 | 0.720 |
+## 4. 다음 비교 실험 계획
 
-ROI reduced the hip keypoint missing rate, but wrist validity decreased and wrist jitter increased.
+### 실험 A — 공정한 분류기 비교 (최우선)
+- **비교 모델:** Random Forest baseline, Lightweight RF, tuned RF, XGBoost, LightGBM, MLP(가능한 경우).
+- **고정 조건:** 동일한 9개 자세 라벨, 동일한 `no_hip` 특징 세트, 동일한 결측 처리 A, 동일한 참가자 단위 LOPO 분할.
+- **주요 지표:** Macro-F1(주 지표), 클래스별 Recall, Accuracy, confusion matrix, 모델 크기, 추론 중앙값/p95.
+- **주의:** 전처리·스케일링·결측 대치·특징 선택은 각 학습 폴드 안에서만 적합한다. 평가 참가자의 정보가 학습 단계로 새어 들어가지 않도록 한다.
+- **해석 기준:** 모델 평균 점수만 나열하지 말고 p01/p02/p03별 점수와 클래스별 실패를 같이 제시한다. 참가자가 3명뿐이라는 한계를 명시한다.
 
-Therefore, ROI should not be described as improving all keypoint measurements. Its effects depend on the body part and metric being evaluated.
+### 실험 B — 특징 제거(ablation)
+`no_hip`를 기준으로 다음을 하나씩 제거한다: 깊이 절대값(head/chest depth), 머리 전방 각도, 머리 높이, 팔꿈치 각도, 손목-얼굴 거리. 각 조건을 같은 LOPO split에서 반복하고 Macro-F1 및 클래스별 Recall 변화를 기록한다. 현재 파일에 있는 특징 세트 비교는 완전한 단일 특징 ablation이 아니므로, 각 특징의 독립적 기여를 주장하려면 재실험이 필요하다.
 
-### 2.6 Rule-Based Detection by Posture
-
-| Posture | Reported result |
-|---|---:|
-| back_hard | 89.7% |
-| back_light | 94.7% |
-| neck_hard | 96.9% |
-| neck_light | 66.2% |
-| forward | 76.9% |
-| forward, compound judgment | 93.2% |
-| slouch | 88.6% |
-| slouch, compound judgment | 88.7% |
-| chin | 28.1% |
-| chin, compound judgment | 49.1% |
-
-The results vary considerably by posture. In particular, chin-related detection showed comparatively low performance.
-
-The wrist-face signal was missing in approximately 40% of cases, which may limit the reliability of features that depend on this signal.
-
-The exact metric definitions and evaluation conditions should be confirmed from the original experiment files before these values are used in the paper.
-
-## 3. Important Reporting Precautions
-
-### 3.1 Do Not Mix Different Classification Tasks
-
-The following files contain results for different classification settings:
-
-- `experiments/rf_lopo.md`: nine-class results.
-- `experiments/rf_tuning.md`: nine-class results.
-- `experiments/rf_lopo_merged.md`: seven-class results with merged intensity labels.
-- `experiments/rf_tuning_merged.md`: seven-class results with merged intensity labels.
-
-Results from the nine-class and seven-class tasks must not be compared as if they came from the same classification problem.
-
-### 3.2 Distinguish Paper Replication from Project Results
-
-The 98% accuracy reported during replication of the external WRF paper is not the same as the performance obtained on this project's own dataset.
-
-The paper's reported results and the project's experimental results must be presented separately.
-
-### 3.3 State the Dataset Limitations
-
-The current LOPO experiment includes three participants. This limits the strength of conclusions about generalization to unseen users.
-
-Future experiments should include more participants and, where possible, repeated recordings under consistent conditions.
-
-## 4. Proposed Model Comparison Experiment
-
-The following models are proposed for a controlled comparison:
-
-1. Baseline Random Forest
-2. Lightweight Random Forest
-3. Tuned Random Forest
-4. XGBoost
-5. LightGBM
-6. Lightweight MLP
-
-These are proposed experiments, not completed results.
-
-### 4.1 Experimental Controls
-
-To make the comparison fair, use the same:
-
-- Nine posture labels.
-- `no_hip` feature configuration as the initial common feature set.
-- Missing-data treatment A.
-- LOPO evaluation protocol.
-- Training and test participant separation.
-- Metric calculation procedure.
-
-Any deviation from these settings should be documented.
-
-Preprocessing operations, including imputation and feature scaling where applicable, must be fitted using training data only within each fold. Test-participant data must not be used to fit preprocessing parameters.
-
-### 4.2 Evaluation Metrics
-
-Report the following metrics:
-
-| Category | Metric | Purpose |
-|---|---|---|
-| Classification | Macro-F1 | Evaluates performance across classes |
-| Classification | Accuracy | Measures overall correctness |
-| Classification | Per-class recall | Identifies poorly detected postures |
-| Classification | Confusion matrix | Shows patterns of misclassification |
-| Efficiency | Model size | Measures storage requirements |
-| Efficiency | Median inference time | Measures typical inference latency |
-| Efficiency | P95 inference time | Measures slower inference cases |
-
-Macro-F1 should be emphasized when class performance is uneven.
-
-For reliable latency comparisons, document the hardware, software environment, measurement procedure, and whether preprocessing is included in the timing.
-
-### 4.3 Additional Experiments
-
-Recommended follow-up experiments include:
-
-- Feature ablation to determine which features contribute most to classification.
-- ROI evaluation using the same recordings and comparable conditions.
-- Additional participant-level validation.
-- Error analysis for difficult classes such as chin-related postures.
-- Runtime evaluation under realistic camera operation.
-
-## 5. Recommended Tables and Figures
-
-The paper's experimental results section could include:
-
-1. A table comparing the feature configurations.
-2. A table comparing RF model performance and computational efficiency.
-3. A confusion matrix for the selected model.
-4. A per-class recall comparison.
-5. A figure comparing keypoint missing rates before and after ROI.
-6. A table summarizing limitations and proposed follow-up experiments.
-
-Only figures and tables supported by completed experiments should be presented as actual results. Planned experiments should be clearly identified as future work.
-
-## 6. Preliminary Conclusions
-
-The existing experiments suggest three main findings.
-
-First, the `no_hip` feature configuration achieved the highest Macro-F1 among the tested feature configurations in the reported nine-class LOPO experiment.
-
-Second, the lightweight RF substantially reduced model size and inference latency while maintaining a Macro-F1 close to the baseline RF.
-
-Third, ROI improved hip keypoint availability but introduced trade-offs in wrist-related measurements. Its effectiveness should therefore be evaluated using multiple metrics rather than a single measure.
-
-These findings are preliminary. The limited participant count, differences between classification tasks, and class-specific detection errors must be considered when drawing conclusions.
-
-The next step is to complete a controlled comparison of candidate models and report classification performance alongside computational efficiency.
+### 실험 C — ROI 수정 평가
+ROI를 적용했을 때의 성공 기준을 사전에 정의한다.
+- 관절별 유효율 및 좌표 jitter
+- 정상 자세의 경고/주의 오탐률
+- 자세별 기대 판정 검출률
+- 가능하면 수작업으로 확인한 소량의 keypoint/자세 정답
+동일한 원본 프레임에서 Base/ROI/Refine/Both를 실행하고, 각 조건에 동일한 지표를 계산한다. ROI가 결측률을 줄였다는 사실만으로 정확도가 개선됐다고 결론 내리지 않는다.
+
+### 실험 D — 일반화 및 재현성 강화
+- 추가 참가자 3–5명 이상을 목표로 수집하되, 참여자 수와 촬영 세션 수를 구분해 보고한다.
+- 가능하면 카메라 위치/의자 거리/조명 중 하나를 바꾸는 별도 세션을 추가한다.
+- 같은 사람의 반복 세션을 통해 회차 내·회차 간 변동을 분리한다.
+- 프레임 수를 독립 표본 수처럼 해석하지 않는다. 인접 프레임의 상관관계를 고려하고, 참가자 단위 결과를 중심으로 보고한다.
+
+## 5. 먼저 해결해야 할 일
+
+1. **라벨 체계 고정:** 9클래스 결과(`rf_lopo.md`, `rf_tuning.md`)와 7클래스 결과(`*_merged.md`) 중 논문 본문에서 사용할 체계를 팀과 확정한다. 두 체계의 수치를 섞지 않는다.
+2. **결과 재현:** 스크립트와 원본 로그를 이용해 주요 표를 재생성하고, 결과 파일의 날짜·설정·커밋을 기록한다.
+3. **비교 모델 실행:** XGBoost/LightGBM/MLP를 동일한 LOPO 분할로 실행한다. 모든 모델이 같은 평가 프레임과 전처리를 사용했는지 확인한다.
+4. **논문 수치 점검:** `compare_results.md`의 FPS는 모든 조건에 동일하게 기록되어 있으므로 수정 방법별 성능 수치로 해석하지 않는다. 실제 모델 지연시간 비교가 필요하면 별도 측정한다.
+5. **리소스 측정:** CPU와 RAM은 현재 표에 값이 비어 있으므로 측정 전에는 논문에서 수치로 주장하지 않는다.
+
+## 6. 현재 단계에서 피해야 할 주장
+
+- “시스템이 모든 사용자에게 높은 정확도를 보인다.”
+- “ROI가 MoveNet 정확도를 향상시켰다.” (현재는 일부 결측 감소와 다른 지표의 악화가 함께 관찰됨)
+- “RF 경량화는 성능 손실이 없다.” (관찰된 Macro-F1 차이는 작지만, 동등성 검정은 수행되지 않음)
+- “우리 시스템의 정확도가 98%다.” (98%는 외부 논문의 공개 데이터셋으로 WRF 파이프라인을 재현한 결과이며, 프로젝트 자체 데이터의 성능이 아님)
