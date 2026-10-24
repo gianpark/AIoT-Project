@@ -1,0 +1,11 @@
+participant,pose,angle_deg,ear_shoulder_deg,facing,score_nose,score_ear,score_shoulder
+p01_env2,normal,48.6,15.8,left,0.82,0.88,0.82
+p01_env2,neck_light,59.7,24.4,left,0.73,0.88,0.82
+p01_env2,neck_hard,67.3,37.2,left,0.82,0.82,0.93
+p01_env2,forward,55.1,21.8,left,0.63,0.82,0.82
+p01_env2,back_hard,37.2,-1.6,left,0.88,0.88,0.73
+p02_env2,normal,45.0,18.1,left,0.73,0.88,0.82
+p02_env2,neck_light,41.5,14.0,left,0.63,0.88,0.82
+p02_env2,neck_hard,53.5,31.9,left,0.88,0.97,0.82
+p02_env2,forward,48.8,22.9,left,0.73,0.82,0.73
+p02_env2,back_hard,14.5,-28.1,left,0.82,0.82,0.82

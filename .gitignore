@@ -43,3 +43,4 @@ slide-*.jpg
 __pycache__/
 .pytest_cache/
 
+data/side_gt/*.jpg
