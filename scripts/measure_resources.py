@@ -26,14 +26,23 @@ from pathlib import Path
 import pandas as pd
 import psutil
 
-OPTS = {"base": [], "roi": ["--roi-crop"], "refine": ["--depth-refine"], "both": ["--roi-crop", "--depth-refine"]}
+OPTS = {"base": [], "roi": ["--roi-crop"], "refine": ["--depth-refine"], "both": ["--roi-crop", "--depth-refine"],
+        "thunder": [], "dual": []}
+DEFAULT_CONDITIONS = ["base", "roi", "refine", "both"]   # 기존 4조건. thunder/dual은 --conditions로 지정할 때만
+THUNDER_MODEL = "models/movenet_thunder_int8.tflite"
+# thunder: 주 모델을 Thunder로 바꾼 전체 파이프라인 / dual: Lightning 주 모델 + 같은 프레임에 Thunder 동시 추론(teacher 기록)
 WARMUP = 10.0
 
 
 def run_condition(name: str, model: str, seconds: float, out_dir: Path) -> dict:
     log = out_dir / f"res_{name}.csv"
+    extra = list(OPTS[name])
+    if name == "thunder":
+        model = THUNDER_MODEL
+    elif name == "dual":
+        extra += ["--teacher-model", THUNDER_MODEL, "--teacher-log", str(out_dir / "res_dual_teacher.csv"), "--overwrite"]
     cmd = [sys.executable, "-m", "src.pose.movenet_keypoints", "--model", model, "--realsense", "--judge",
-           "--log", str(log), "--duration", str(seconds + WARMUP), *OPTS[name]]
+           "--log", str(log), "--duration", str(seconds + WARMUP), *extra]
     ncpu = psutil.cpu_count(logical=True)
     t0 = time.time()
     errf = out_dir / f"stderr_{name}.txt"
@@ -110,7 +119,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="models/movenet_lightning_int8.tflite")
     ap.add_argument("--seconds", type=float, default=60.0, help="측정 구간(초). 앞에 WARMUP초가 추가로 돈다")
-    ap.add_argument("--conditions", nargs="+", default=list(OPTS), choices=list(OPTS))
+    ap.add_argument("--conditions", nargs="+", default=DEFAULT_CONDITIONS, choices=list(OPTS))
     ap.add_argument("--out", default="experiments/resource_usage.md")
     args = ap.parse_args()
     out_dir = Path("data/resource_logs")

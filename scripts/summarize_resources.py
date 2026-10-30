@@ -1,5 +1,6 @@
 """measure_resources 반복 측정 결과(resource_usage*.md)를 조건별 평균 ± SD로 요약한다.
-사용: python -m scripts.summarize_resources experiments/resource_usage.md experiments/resource_usage_run2.md ..."""
+사용: python -m scripts.summarize_resources experiments/resource_usage.md experiments/resource_usage_run2.md ... [--out 요약파일.md]
+--out이 없으면 experiments/resource_usage_summary.md에 쓴다(기존 파일을 덮어쓴다)."""
 from __future__ import annotations
 
 import statistics
@@ -22,9 +23,15 @@ def parse(path: Path) -> dict[str, dict[str, float]]:
     return rows
 
 
-def main(paths: list[str]) -> None:
+def main(argv: list[str]) -> None:
+    out_path = "experiments/resource_usage_summary.md"
+    paths = list(argv)
+    if "--out" in paths:
+        i = paths.index("--out")
+        out_path = paths[i + 1]
+        del paths[i:i + 2]
     runs = [parse(Path(p)) for p in paths]
-    conds = [c for c in ("base", "roi", "refine", "both") if all(c in r for r in runs)]
+    conds = [c for c in ("base", "roi", "refine", "both", "thunder", "dual") if all(c in r for r in runs)]
     out = [f"# 파이프라인 리소스 반복 측정 요약 ({len(runs)}회, 평균 ± SD)", "",
            "| 조건 | 실효 fps | CPU %(코어 1개) | CPU %(전체 대비) | RAM MB | fps 회차별 |", "|---|---|---|---|---|---|"]
     for c in conds:
@@ -35,7 +42,7 @@ def main(paths: list[str]) -> None:
         per = " / ".join(f"{float(r[c][COLS['fps']]):.1f}" for r in runs)
         out.append(f"| {c} | " + " | ".join(cell) + f" | {per} |")
     text = "\n".join(out)
-    Path("experiments/resource_usage_summary.md").write_text(text, encoding="utf-8")
+    Path(out_path).write_text(text, encoding="utf-8")
     print(text)
 
 
