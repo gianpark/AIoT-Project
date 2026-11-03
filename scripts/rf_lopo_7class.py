@@ -13,7 +13,7 @@ import os
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import confusion_matrix, f1_score, recall_score
+from sklearn.metrics import confusion_matrix, f1_score, recall_score, precision_recall_fscore_support
 
 from scripts.replay_judge_on_logs import load
 
@@ -138,6 +138,11 @@ def main() -> None:
 
     # 5. 특징 세트 및 결측 처리별 실험
     keep = {}
+    summary_rows = []
+    class_metric_rows = []
+    fold_metric_rows = []
+    confusion_rows = []
+    fold_confusion_rows = []
 
     for sname, cols in SETS.items():
         for mode in ("A", "B"):
@@ -155,6 +160,55 @@ def main() -> None:
             ]
 
             keep[(sname, mode)] = r
+
+            # 조건별 전체 OOF 예측을 모아 클래스별 지표와 혼동행렬 저장
+            valid_folds = [(person, value) for person, value in r.items() if value]
+            if valid_folds:
+                y_all = np.concatenate([value["y"] for _, value in valid_folds])
+                p_all = np.concatenate([value["p"] for _, value in valid_folds])
+                precision, recall, f1, support = precision_recall_fscore_support(
+                    y_all, p_all, labels=classes, zero_division=0
+                )
+                for label, prc, rec, f1v, sup in zip(classes, precision, recall, f1, support):
+                    class_metric_rows.append({
+                        "feature_set": sname, "mode": mode, "class": label,
+                        "precision": prc, "recall": rec, "f1": f1v, "support": int(sup)
+                    })
+
+                cm_all = confusion_matrix(y_all, p_all, labels=classes)
+                for i, true_label in enumerate(classes):
+                    for j, predicted_label in enumerate(classes):
+                        confusion_rows.append({
+                            "feature_set": sname, "mode": mode,
+                            "true_label": true_label, "predicted_label": predicted_label,
+                            "count": int(cm_all[i, j])
+                        })
+
+                summary_rows.append({
+                    "feature_set": sname, "mode": mode,
+                    "macro_f1": f1_score(y_all, p_all, labels=classes, average="macro", zero_division=0),
+                    "accuracy": float(np.mean(y_all == p_all)),
+                    "keep_ratio": float(np.mean([value["keep"] for _, value in valid_folds]))
+                })
+
+                for person, value in valid_folds:
+                    prc_f, rec_f, f1_f, sup_f = precision_recall_fscore_support(
+                        value["y"], value["p"], labels=classes, zero_division=0
+                    )
+                    for label, prc, rec, f1v, sup in zip(classes, prc_f, rec_f, f1_f, sup_f):
+                        fold_metric_rows.append({
+                            "feature_set": sname, "mode": mode, "participant": person,
+                            "class": label, "precision": prc, "recall": rec,
+                            "f1": f1v, "support": int(sup)
+                        })
+                    cm_fold = confusion_matrix(value["y"], value["p"], labels=classes)
+                    for i, true_label in enumerate(classes):
+                        for j, predicted_label in enumerate(classes):
+                            fold_confusion_rows.append({
+                                "feature_set": sname, "mode": mode, "participant": person,
+                                "true_label": true_label, "predicted_label": predicted_label,
+                                "count": int(cm_fold[i, j])
+                            })
 
             L.append(
                 f"| {sname} | {mode} | "
@@ -259,6 +313,25 @@ def main() -> None:
 
     print("\n".join(L))
     print(f"\n결과 저장 완료: {a.out}")
+
+    # 클래스별 지표 및 혼동행렬 CSV 저장
+    out_dir = os.path.dirname(a.out) or "."
+    pd.DataFrame(summary_rows).to_csv(
+        os.path.join(out_dir, "rf_lopo_7class_summary.csv"), index=False
+    )
+    pd.DataFrame(class_metric_rows).to_csv(
+        os.path.join(out_dir, "rf_lopo_7class_metrics.csv"), index=False
+    )
+    pd.DataFrame(fold_metric_rows).to_csv(
+        os.path.join(out_dir, "rf_lopo_7class_fold_metrics.csv"), index=False
+    )
+    pd.DataFrame(confusion_rows).to_csv(
+        os.path.join(out_dir, "rf_lopo_7class_confusion.csv"), index=False
+    )
+    pd.DataFrame(fold_confusion_rows).to_csv(
+        os.path.join(out_dir, "rf_lopo_7class_fold_confusion.csv"), index=False
+    )
+    print("CSV 저장 완료: RF summary / metrics / fold_metrics / confusion / fold_confusion")
 
 
 if __name__ == "__main__":

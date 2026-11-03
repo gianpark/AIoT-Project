@@ -9,6 +9,7 @@ from sklearn.metrics import (
     confusion_matrix,
     f1_score,
     recall_score,
+    precision_recall_fscore_support,
 )
 from sklearn.preprocessing import LabelEncoder
 
@@ -160,6 +161,8 @@ def run(D, cols, mode):
 
     fold_results = []
     keep_ratios = []
+    fold_class_metrics = []
+    fold_confusions = []
 
     feature_importances = []
 
@@ -216,6 +219,29 @@ def run(D, cols, mode):
             "keep_ratio": keep_ratio,
         })
 
+        p, r, f, support = precision_recall_fscore_support(
+            yte, ypred, labels=CLASSES, zero_division=0
+        )
+        for label, pv, rv, fv, sv in zip(CLASSES, p, r, f, support):
+            fold_class_metrics.append({
+                "participant": test_person,
+                "class": label,
+                "precision": pv,
+                "recall": rv,
+                "f1": fv,
+                "support": sv,
+            })
+
+        fold_cm = confusion_matrix(yte, ypred, labels=CLASSES)
+        for i, true_label in enumerate(CLASSES):
+            for j, pred_label in enumerate(CLASSES):
+                fold_confusions.append({
+                    "participant": test_person,
+                    "true_label": true_label,
+                    "predicted_label": pred_label,
+                    "count": int(fold_cm[i, j]),
+                })
+
         importance = pd.Series(
             model.feature_importances_,
             index=(
@@ -251,6 +277,17 @@ def run(D, cols, mode):
         zero_division=0,
     )
 
+    precision, recall, class_f1, support = precision_recall_fscore_support(
+        y_true_all, y_pred_all, labels=CLASSES, zero_division=0
+    )
+    class_metrics = pd.DataFrame({
+        "class": CLASSES,
+        "precision": precision,
+        "recall": recall,
+        "f1": class_f1,
+        "support": support,
+    })
+
     importance_mean = pd.concat(
         feature_importances,
         axis=1,
@@ -270,6 +307,9 @@ def run(D, cols, mode):
         ),
         "recalls": recalls,
         "cm": cm,
+        "class_metrics": class_metrics,
+        "fold_class_metrics": pd.DataFrame(fold_class_metrics),
+        "fold_confusions": pd.DataFrame(fold_confusions),
         "folds": fold_results,
         "keep_ratio": np.mean(keep_ratios),
         "importance": importance_mean,
@@ -300,6 +340,10 @@ def main():
     print(D["participant"].value_counts())
 
     results = []
+    all_class_metrics = []
+    all_fold_class_metrics = []
+    all_confusions = []
+    all_fold_confusions = []
 
     for set_name, cols in SETS.items():
         for mode in ["A", "B"]:
@@ -316,6 +360,32 @@ def main():
                 "accuracy": result["accuracy"],
                 "keep_ratio": result["keep_ratio"],
             })
+
+            cm_df = pd.DataFrame(result["cm"], index=CLASSES, columns=CLASSES)
+            cm_df.index.name = "true_label"
+            cm_long = cm_df.reset_index().melt(
+                id_vars="true_label",
+                var_name="predicted_label",
+                value_name="count",
+            )
+            cm_long.insert(0, "mode", mode)
+            cm_long.insert(0, "feature_set", set_name)
+            all_confusions.append(cm_long)
+
+            metrics_df = result["class_metrics"].copy()
+            metrics_df.insert(0, "mode", mode)
+            metrics_df.insert(0, "feature_set", set_name)
+            all_class_metrics.append(metrics_df)
+
+            fold_metrics_df = result["fold_class_metrics"].copy()
+            fold_metrics_df.insert(0, "mode", mode)
+            fold_metrics_df.insert(0, "feature_set", set_name)
+            all_fold_class_metrics.append(fold_metrics_df)
+
+            fold_cm_df = result["fold_confusions"].copy()
+            fold_cm_df.insert(0, "mode", mode)
+            fold_cm_df.insert(0, "feature_set", set_name)
+            all_fold_confusions.append(fold_cm_df)
 
             print("\nClass Recall:")
             for label, recall in zip(
@@ -348,6 +418,17 @@ def main():
 
     output_path = OUT_DIR / "lgbm_lopo_7class_summary.csv"
     summary.to_csv(output_path, index=False)
+
+    outputs = {
+        "lgbm_lopo_7class_metrics.csv": pd.concat(all_class_metrics, ignore_index=True),
+        "lgbm_lopo_7class_fold_metrics.csv": pd.concat(all_fold_class_metrics, ignore_index=True),
+        "lgbm_lopo_7class_confusion.csv": pd.concat(all_confusions, ignore_index=True),
+        "lgbm_lopo_7class_fold_confusion.csv": pd.concat(all_fold_confusions, ignore_index=True),
+    }
+    for filename, frame in outputs.items():
+        out = OUT_DIR / filename
+        frame.to_csv(out, index=False)
+        print(f"Saved: {out}")
 
     print(f"\nSaved: {output_path}")
 
