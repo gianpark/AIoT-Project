@@ -81,3 +81,47 @@
 -   [ ] 참가자 단위 LOPO로 세 알고리즘을 평가했다.
 -   [ ] fold별 결과와 혼동행렬을 저장했다.
 -   [ ] 기존 9-class 실험 파일을 덮어쓰지 않았다.
+
+## 진행 상황 업데이트
+
+### 1. 7-Class RF LOPO 실험 완료
+
+기존 11개 자세 라벨을 교수님 지시에 따라 7개 클래스로 통합하였다.
+
+- 정자세: normal
+- 거북목: neck_hard, neck_light
+- 앞으로 기울임: forward
+- 뒤로 기댐: back_hard, back_light
+- 왼쪽 기울임: left_lean_neck
+- 오른쪽 기울임: right_lean_neck
+- 나쁜 자세: back_neck, chin, slouch
+
+### 2. 실험 환경
+
+- 전체 데이터: 54,070프레임
+- 참가자: p01, p02, p03
+- 분류 알고리즘: Random Forest
+- 검증 방식: Leave-One-Participant-Out
+- 트리 개수: 300
+- 클래스 불균형 처리: class_weight=balanced
+
+### 3. 실험 결과
+
+- 최고 평균 Macro-F1: 0.515
+- 최고 설정: no_hip + B
+- no_hip + A 평균 Macro-F1: 0.493
+
+좌우 기울임 자세의 Recall이 낮게 나타나 해당 자세의 분류 성능 개선이 필요하다.
+
+### 4. 수정 및 생성 파일
+
+- 코드: scripts/rf_lopo_7class.py
+- 결과: experiments/rf_lopo_7class.md
+
+### 5. 다음 작업
+
+1. 7-Class XGBoost LOPO 실험
+2. 7-Class LightGBM LOPO 실험
+3. RF, XGBoost, LightGBM 성능 비교
+4. A0~A6 어블레이션 실험
+5. 2D 기준선 재실행
