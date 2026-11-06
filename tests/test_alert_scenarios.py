@@ -79,3 +79,28 @@ def test_alert_gaps_never_below_cooldown_on_long_mixed_scenario():
     prox, post = times(ev, "proximity"), times(ev, "posture")
     assert all(b - a >= 60.0 for a, b in zip(prox, prox[1:]))
     assert all(b - a >= 300.0 for a, b in zip(post, post[1:]))
+
+
+def run_caution(seq, step=STEP):
+    sm = AlertStateMachine(caution_alert=True)
+    return [(i * step, a) for i, j in enumerate(seq) for a in sm.update(i * step, j)]
+
+
+def test_caution_alert_off_by_default():
+    assert times(run([J(CAUTION, "neck_forward")] * 6), "caution") == []
+
+
+def test_caution_alert_after_three_consecutive_cautions():
+    ev = run_caution([J(CAUTION, "neck_forward")] * 3)
+    assert times(ev, "caution") == [10.0] and times(ev, "posture") == []
+
+
+def test_caution_alert_streak_reset_and_cooldown():
+    assert times(run_caution([J(CAUTION, "neck_forward")] * 2 + [J()] + [J(CAUTION, "neck_forward")] * 2), "caution") == []
+    ev = run_caution([J(CAUTION, "neck_forward")] * 70)  # 약 6분 지속 → 첫 알림 후 300초 쿨다운
+    assert times(ev, "caution") == [10.0, 310.0]
+
+
+def test_warning_suppresses_same_sample_caution_and_starts_cooldown():
+    ev = run_caution([J(WARNING, "neck_forward")] * 3 + [J(CAUTION, "neck_forward")] * 10)
+    assert times(ev, "posture") == [10.0] and times(ev, "caution") == []  # 방금 경고를 들었으니 주의는 쿨다운 동안 없음

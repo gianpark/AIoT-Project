@@ -165,3 +165,12 @@ def test_chin_rest_from_wrist_near_face_and_compound():
     kinds = [kk for kk, _ in j2.issues]
     assert "chin_rest" in kinds and "neck_forward" in kinds
     assert judge(kps(), base).posture_kind is None  # 손목이 멀면 턱 괴기 아님
+
+
+def test_chin_priority_over_neck_forward():
+    k = kps()
+    k[10] = Keypoint(name="k10", x=0.52, y=0.30, score=0.9)  # 오른쪽 손목이 코 근처
+    base = {"head_depth_m": 0.60, "chest_depth_m": 0.75, "hip_depth_m": None, "torso_recline_offset_m": None}
+    j = judge(k, {**base, "neck_forward_offset_m": 0.24})  # neck_forward 비율이 chin보다 커도
+    assert j.posture_kind == "chin_rest" and j.posture_level == WARNING  # 턱 괴기가 1순위
+    assert "neck_forward" in [kk for kk, _ in j.issues]  # 다른 문제는 issues에 남는다

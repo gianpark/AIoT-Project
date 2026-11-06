@@ -42,6 +42,9 @@ CHIN_WRIST_REF_SW = 1.2
 RECLINE_WARN_M = 0.10  # torso_recline_offset_m: +면 숙임(엉덩이가 가슴보다 멀다), -면 기댐 (정상 -0.05, 숙임 +0.17, 기댐 -0.16)
 LATERAL_WARN = 0.35  # 어깨 중점이 엉덩이 중점에서 옆으로 벗어난 정도(어깨너비 단위) — 몸통 약 15° 기울임에 해당하는 잠정값
 CAUTION_RATIO = 0.7  # 경고 임계값의 70%부터 "주의"
+# 턱 괴기 우선(11/6 평가: 환경 1 종류 일치 14→33%): 손목이 코 근처(경고 임계 이내)이면 다른 문제와 비율을 겨루지 않고 chin_rest로 정한다.
+# 턱을 괼 때 머리가 앞으로 나가 neck_forward 비율이 더 커지는 경우가 많았다. 다른 문제는 issues에 그대로 남는다.
+CHIN_PRIORITY = True
 
 
 class ProximityEstimator:
@@ -180,6 +183,8 @@ def judge(keypoints, depth_features: Optional[dict],
 
     issues = sorted(((k, r) for k, r in ratios.items() if r >= CAUTION_RATIO), key=lambda kr: -kr[1])
     kind, ratio = (max(ratios.items(), key=lambda kv: kv[1]) if ratios else (None, 0.0))
+    if CHIN_PRIORITY and ratios.get("chin_rest", 0.0) >= 1.0:
+        kind, ratio = "chin_rest", ratios["chin_rest"]
     if ratio >= 1.0:
         level = WARNING
     elif ratio >= CAUTION_RATIO:
@@ -198,7 +203,12 @@ class AlertStateMachine:
     """알림 유예·쿨다운 상태머신. 샘플(5초 주기)마다 update()하면 발생한 알림 목록을 돌려준다."""
 
     def __init__(self, posture_consecutive: int = 3, proximity_cooldown_s: float = 60.0,
-                 posture_cooldown_s: float = 300.0):
+                 posture_cooldown_s: float = 300.0, caution_alert: bool = False):
+        # caution_alert: 주의 이상이 posture_consecutive회 연속이면 종류를 말하지 않는 약한 "caution" 알림을 추가한다
+        # (11/6 평가: 환경 1 검출 +15~30%p, 정상 오경고 0%. 주의 알림의 종류 일치율은 낮아 종류를 붙이지 않는다).
+        self.caution_alert = caution_alert
+        self._caution_streak = 0
+        self._last_caution_alert: Optional[float] = None
         self.posture_consecutive = posture_consecutive
         self.proximity_cooldown_s = proximity_cooldown_s
         self.posture_cooldown_s = posture_cooldown_s
@@ -218,6 +228,16 @@ class AlertStateMachine:
             alerts.append(f"posture:{j.posture_kind}")
             self._last_posture_alert = now_s
             self._warn_streak = 0
+            # 방금 경고를 들었으면 같은 자세에 대한 주의 알림은 쿨다운이 끝날 때까지 울리지 않는다.
+            self._last_caution_alert = now_s
+            self._caution_streak = 0
+        elif self.caution_alert:
+            self._caution_streak = self._caution_streak + 1 if j.posture_level != NORMAL else 0
+            if self._caution_streak >= self.posture_consecutive and self._ready(
+                    self._last_caution_alert, now_s, self.posture_cooldown_s):
+                alerts.append("caution")
+                self._last_caution_alert = now_s
+                self._caution_streak = 0
         return alerts
 
     @staticmethod

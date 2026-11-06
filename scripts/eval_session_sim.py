@@ -58,8 +58,7 @@ def run_session(pool, rng, cooldown, soft):
         else:
             segs.append(("normal", pool["normal"][rng.integers(len(pool["normal"]))]))
     phase = rng.uniform(0, 5.0)  # 세션 시작 시점에 따른 샘플 위상(한 녹화의 같은 지점만 반복해 보지 않도록)
-    sm = AlertStateMachine(posture_cooldown_s=cooldown)
-    soft_streak, last_soft = 0, None
+    sm = AlertStateMachine(posture_cooldown_s=cooldown, caution_alert=soft)
     ep = {pose: [] for pose in poses}
     fa = fa_w = 0
     nsamp = nwarn = ncaut = 0
@@ -68,12 +67,9 @@ def run_session(pool, rng, cooldown, soft):
         for k in range(int(SEG_S // 5)):  # 구간 길이가 샘플 간격의 배수라 위상은 세션 내내 같다
             now = si * SEG_S + 5.0 * k
             j = js[min(int(np.searchsorted(t, phase + 5.0 * k)), len(js) - 1)]
-            al = [a for a in sm.update(now, j) if a.startswith("posture")]
-            warned |= bool(al)
-            if soft:
-                soft_streak = soft_streak + 1 if j.posture_level != NORMAL else 0
-                if soft_streak >= 3 and (last_soft is None or now - last_soft >= cooldown):
-                    softed, last_soft, soft_streak = True, now, 0
+            al = sm.update(now, j)
+            warned |= any(a.startswith("posture") for a in al)
+            softed |= "caution" in al  # 앱의 AlertStateMachine(caution_alert=True)을 그대로 쓴다
             if pose == "normal":
                 nsamp += 1
                 nwarn += j.posture_level == "경고"

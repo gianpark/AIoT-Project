@@ -700,6 +700,9 @@ def main():
     parser.add_argument("--judge", action="store_true",
                          help="자세·거리 판정(정상/주의/경고 + 화면 근접)을 화면에 표시하고, 샘플 주기마다 알림 조건을 "
                               "검사해 터미널에 출력한다 (5주차 판정 로직 1차 통합, src/logic/decision.py)")
+    parser.add_argument("--caution-alert", action="store_true",
+                         help="--judge에서 주의 이상이 연속 3회(5초 간격) 이어지면 종류를 말하지 않는 약한 'caution' 알림을 추가한다 "
+                              "(11/6 오프라인 평가: 환경 1 검출 +15~30%%p, 정상 오경고 0%%. 앱 실사용 검증 전)")
     parser.add_argument("--no-side-view", action="store_true",
                          help="--judge에서 별도 창에 띄우는 측면 자세 뷰(머리·가슴·허리 depth로 옆에서 본 모습)를 끈다")
     parser.add_argument("--countdown", type=float, default=0.0,
@@ -870,7 +873,7 @@ def main():
         print(f"전경 분리 사용: {subject_min_depth:.2f}~{subject_max_depth:.2f}m 밖은 검게 지웁니다 "
               f"(여러 명이 잡혀도 그 범위 안 사람만 인식 — 끄려면 --no-subject-isolation)")
 
-    alert_machine = AlertStateMachine() if args.judge else None
+    alert_machine = AlertStateMachine(caution_alert=args.caution_alert) if args.judge else None
     proximity_estimator = ProximityEstimator()
     last_sample_t = None
     from src.pose.side_view import SideViewSmoother

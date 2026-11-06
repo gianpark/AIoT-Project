@@ -14,7 +14,7 @@
 | back_hard | 83 | 83 | 0 | 60 |
 | back_light | 80 | 80 | 0 | 60 |
 | back_neck | 22 | - | 0 | 60 |
-| chin | 73 | 12 | 83 | 60 |
+| chin | 73 | 40 | 83 | 60 |
 | forward | 70 | 62 | 83 | 60 |
 | left_lean_neck | 50 | 0 | 0 | 10 |
 | neck_hard | 87 | 87 | 0 | 60 |
@@ -37,7 +37,7 @@
 | back_hard | 87 | 87 | 0 | 60 |
 | back_light | 72 | 72 | 0 | 60 |
 | back_neck | 22 | - | 0 | 60 |
-| chin | 73 | 12 | 83 | 60 |
+| chin | 73 | 40 | 83 | 60 |
 | forward | 82 | 58 | 83 | 60 |
 | left_lean_neck | 50 | 0 | 0 | 10 |
 | neck_hard | 87 | 87 | 0 | 60 |
