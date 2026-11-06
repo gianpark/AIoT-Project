@@ -4,7 +4,7 @@
 - 샘플 시작 시점(위상)을 0~4.5초 사이 0.5초 간격으로 바꿔 10가지로 재생하고 평균한다.
 - 보정: 참가자별 normal 첫 녹화의 처음 150프레임(약 5초)의 neck_forward_offset_m 중앙값을 REF_NF(0.143)로 옮기는
   이동량을 모든 프레임에 더한다. 그 150프레임은 normal 평가에서 제외한다. (좌우 치우침은 이번에 보정하지 않음). 환경 2 normal은 150프레임을 빼면 너무 짧아 기준 프레임을 포함해 평가한다.
-- 좌표(x, y)가 없는 로그는 합성 keypoint로 재생되어 좌우 기울임 판정이 불가하므로 좌우 자세는 표에서 뺀다.
+- 좌표(x, y)가 없는 녹화는 합성 keypoint로 재생되어 좌우 기울임 판정이 불가하므로, 좌우 자세는 좌표가 있는 녹화만 채점한다(녹화 단위).
 
 사용: python -m scripts.eval_alert_level [--out experiments/alert_level_eval.md]
 """
@@ -85,6 +85,8 @@ def evaluate(D: pd.DataFrame, calibrate: bool):
             # 보정 기준 녹화에서 150프레임을 빼면 20초 규칙(샘플 3회)을 돌릴 길이가 안 되는 경우가 있다(환경 2 normal).
             # 그때는 기준 프레임을 포함한 전체 녹화로 평가하고 표에 표시한다(정상 오경고가 낙관적으로 나온다).
             g = g_eval if len(g_eval) >= 300 else g
+            if pose in LEAN and not ("nose_x" in g and g["nose_x"].notna().any()):
+                continue  # 좌표가 없는 녹화는 합성 keypoint로 재생되어 좌우 판정이 불가하므로 채점하지 않는다
             if len(g) < 300:
                 continue
             t = g["timestamp"].to_numpy(float)
