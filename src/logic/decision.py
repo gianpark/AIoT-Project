@@ -45,6 +45,9 @@ CAUTION_RATIO = 0.7  # 경고 임계값의 70%부터 "주의"
 # 턱 괴기 우선(11/6 평가: 환경 1 종류 일치 14→33%): 손목이 코 근처(경고 임계 이내)이면 다른 문제와 비율을 겨루지 않고 chin_rest로 정한다.
 # 턱을 괼 때 머리가 앞으로 나가 neck_forward 비율이 더 커지는 경우가 많았다. 다른 문제는 issues에 그대로 남는다.
 CHIN_PRIORITY = True
+# 손목 keypoint 점수 기준(코·어깨는 0.3 고정). 11/6 평가(experiments/wrist_score_eval.md): 0.1로 낮추면 chin 종류 일치가 소폭 오르고
+# 정상 오경고는 늘지 않았지만 정상 녹화에 손을 얼굴로 가져가는 동작이 없어 오경고 영향을 검증하지 못했다. 기본값은 기존 0.3 유지.
+WRIST_MIN_SCORE = 0.3
 
 
 class ProximityEstimator:
@@ -112,7 +115,8 @@ def lateral_offset(keypoints) -> Optional[float]:
     return float((norm[5][0] + norm[6][0]) / 2.0)
 
 
-def wrist_face_distance(keypoints, frame_aspect: float = 640 / 480, min_score: float = 0.3) -> Optional[float]:
+def wrist_face_distance(keypoints, frame_aspect: float = 640 / 480, min_score: float = 0.3,
+                        wrist_min_score: Optional[float] = None) -> Optional[float]:
     """코에서 가장 가까운 손목까지의 거리를 어깨너비로 나눈 값(작을수록 손이 얼굴 근처 = 턱 괴기 후보).
     코·어깨·손목이 하나라도 안 보이면 None. frame_aspect=프레임 너비/높이(정규화 좌표의 가로 보정)."""
     nose, l_sh, r_sh = keypoints[0], keypoints[5], keypoints[6]
@@ -122,7 +126,7 @@ def wrist_face_distance(keypoints, frame_aspect: float = 640 / 480, min_score: f
     if sw < 1e-3:
         return None
     ds = [float(np.hypot((w.x - nose.x) * frame_aspect, w.y - nose.y)) / sw
-          for w in (keypoints[9], keypoints[10]) if w.score >= min_score]
+          for w in (keypoints[9], keypoints[10]) if w.score >= (WRIST_MIN_SCORE if wrist_min_score is None else wrist_min_score)]
     return min(ds) if ds else None
 
 
