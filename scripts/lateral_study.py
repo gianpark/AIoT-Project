@@ -16,7 +16,7 @@
     선우의 7-class 수치와 직접 비교하면 안 된다(몸통 길이 비 0.71 대 1.05~1.14).
   - 참가자 3명(환경 2는 2명), 자세당 1~3회 녹화의 예비 결과다.
 
-사용: python -m scripts.lateral_study --mode lopo [--seeds 5] [--p01-dir data/side_p01_v2]
+사용: python -m scripts.lateral_study --mode lopo [--seeds 5] [--model rf|lgbm|xgb] [--p01-dir data/side_p01_v2]
 출력: experiments/lateral_study_<mode>.md
 """
 from __future__ import annotations
@@ -78,10 +78,30 @@ def calibrate(d: pd.DataFrame, bl: list[int], cols: list[str]) -> pd.DataFrame:
     return d
 
 
+MODEL = "rf"  # --model 로 바꾼다. lgbm, xgb 설정은 seed_stability_a0_a6.py(선우)와 같다.
+
+
+def make_model(seed: int):
+    if MODEL == "rf":
+        return RandomForestClassifier(300, class_weight="balanced", random_state=seed, n_jobs=-1)
+    if MODEL == "lgbm":
+        from lightgbm import LGBMClassifier
+        return LGBMClassifier(n_estimators=300, num_leaves=31, learning_rate=0.05, objective="multiclass",
+                              class_weight="balanced", random_state=seed, n_jobs=-1, verbosity=-1)
+    from xgboost import XGBClassifier
+    return XGBClassifier(n_estimators=300, max_depth=6, learning_rate=0.05, subsample=0.9, colsample_bytree=0.9,
+                         objective="multi:softprob", eval_metric="mlogloss", tree_method="hist",
+                         random_state=seed, n_jobs=-1)
+
+
 def fit_predict(tr, te, cols, seed, label_col="pose"):
     xtr, xte = prepare_mode_a(tr, te, cols)
-    m = RandomForestClassifier(300, class_weight="balanced", random_state=seed, n_jobs=-1).fit(xtr, tr[label_col])
-    return m.predict(xte)
+    y = tr[label_col]
+    if MODEL == "xgb":  # XGBoost는 정수 라벨만 받고, 학습에 없는 클래스는 건너뛴다
+        classes = sorted(y.unique())
+        m = make_model(seed).fit(xtr, y.map({c: i for i, c in enumerate(classes)}))
+        return np.array(classes, dtype=object)[m.predict(xte).astype(int)]
+    return make_model(seed).fit(xtr, y).predict(xte)
 
 
 def prepare_sets(d, bl):
@@ -234,11 +254,15 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", required=True, choices=["lopo", "cross_env", "binary", "split"])
     ap.add_argument("--seeds", type=int, default=5)
+    ap.add_argument("--model", default="rf", choices=["rf", "lgbm", "xgb"])
     ap.add_argument("--p01-dir", default="data/side_p01_v2")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
+    global MODEL
+    MODEL = a.model
     L = {"lopo": mode_lopo, "cross_env": mode_cross_env, "binary": mode_binary, "split": mode_split}[a.mode](a)
-    out = a.out or f"experiments/lateral_study_{a.mode}.md"
+    suffix = "" if a.model == "rf" else f"_{a.model}"
+    out = a.out or f"experiments/lateral_study_{a.mode}{suffix}.md"
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     open(out, "w", encoding="utf-8").write("\n".join(L) + "\n")
     print("\n".join(L))
