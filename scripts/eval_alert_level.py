@@ -25,6 +25,7 @@ REF_NF = 0.143
 CALIB_FRAMES = 150
 PHASES = np.arange(0.0, 5.0, 0.5)
 LEAN = {"left_lean_neck", "right_lean_neck"}
+BORDER = {"neck_light", "back_light"}  # 촬영할 때부터 정상과 경계에 둔 가벼운 자세. 명확한 자세와 따로 요약한다.
 EXPECT = {"normal": None, "back_hard": "slouch_back", "back_light": "slouch_back", "neck_hard": "neck_forward",
           "neck_light": "neck_forward", "forward": "neck_forward", "slouch": "neck_forward", "chin": "chin_rest",
           "back_neck": None, "left_lean_neck": "tilt_left", "right_lean_neck": "tilt_right"}
@@ -107,8 +108,13 @@ def table(R: pd.DataFrame, title: str, calibrate_note: str) -> list[str]:
                  f"{('%.0f' % (g.correct.mean()*100)) if EXPECT.get(pose) else '-'} | {g.proximity.mean()*100:.0f} | {len(g)} |")
     bad = R[(R.pose != "normal")]
     nm = R[R.pose == "normal"]
+    clear = bad[~bad.pose.isin(BORDER)]
+    border = bad[bad.pose.isin(BORDER)]
+    fmt = lambda x: f"{x.groupby('pose').posture.mean().mean()*100:.0f}%" if len(x) else "-"
     L += ["", f"- 정상 자세 오경고(자세 경고 발생률): {nm.posture.mean()*100:.0f}%, 근접 알림 {nm.proximity.mean()*100:.0f}%",
-          f"- 나쁜 자세 평균 검출(자세별 평균): {bad.groupby('pose').posture.mean().mean()*100:.0f}%", ""]
+          f"- 나쁜 자세 평균 검출(자세별 평균, 전체): {fmt(bad)}",
+          f"- 명확한 자세 평균 검출(경계 자세 제외): {fmt(clear)}",
+          f"- 경계 자세(neck_light, back_light) 평균 검출: {fmt(border)}", ""]
     return L
 
 
