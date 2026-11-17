@@ -117,6 +117,21 @@ class RealSenseCamera:
         )
 
         self._profile = None
+        # 원본 저장기(src/capture/raw_recorder.py) — None이면 저장하지 않는다. depth는 필터 적용 전 값을 넘긴다.
+        self.raw_sink = None
+
+    def cam_info(self) -> dict:
+        """원본 저장 메타데이터용 카메라 정보(해상도·fps·depth_scale·color 내부 파라미터)."""
+        info = {"width": self.width, "height": self.height, "fps_requested": self.fps,
+                "depth_scale": getattr(self, "depth_scale", None)}
+        try:
+            intr = self._profile.get_stream(rs.stream.color).as_video_stream_profile().get_intrinsics()
+            info["color_intrinsics"] = {"fx": intr.fx, "fy": intr.fy, "ppx": intr.ppx, "ppy": intr.ppy,
+                                        "width": intr.width, "height": intr.height}
+            info["device_serial"] = self._profile.get_device().get_info(rs.camera_info.serial_number)
+        except Exception:  # noqa: BLE001 - 메타데이터 실패가 촬영을 막으면 안 된다
+            pass
+        return info
 
     def configure_filters(self, use_spatial: bool = True, use_temporal: bool = True,
                           use_hole_filling: bool = True,
@@ -188,6 +203,10 @@ class RealSenseCamera:
         color_frame = frames.get_color_frame()
         if not depth_frame or not color_frame:
             return None
+
+        if self.raw_sink is not None and self.raw_sink.active:
+            self.raw_sink.put(color_frame.get_timestamp(), np.asanyarray(color_frame.get_data()),
+                              np.asanyarray(depth_frame.get_data()))
 
         if self.use_filters:
             if self.use_spatial:

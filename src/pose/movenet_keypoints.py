@@ -430,6 +430,10 @@ class _RealSenseSource:
         self._cam = RealSenseCamera(fps=fps, hole_filling_mode=2).start()
         self._last_depth_frame = None
 
+    def attach_raw_recorder(self, recorder) -> None:
+        recorder.cam_info.update(self._cam.cam_info())
+        self._cam.raw_sink = recorder
+
     def read(self):
         result = self._cam.read()
         if result is None:
@@ -652,6 +656,9 @@ def main():
     parser.add_argument("--realsense", action="store_true",
                          help="일반 웹캠 대신 RealSense D455의 color 스트림을 사용 (pyrealsense2 필요)")
     parser.add_argument("--fps", type=int, default=30, help="--realsense 사용 시 요청 fps")
+    parser.add_argument("--save-raw", type=str, default=None,
+                         help="RGB·Depth 원본을 이 폴더에 저장(--realsense 필요, 카운트다운 구간 제외). "
+                              "IRB 승인 후 촬영분을 타 팀에 제공하기 위한 것. 예: data/raw_rgbd/p01/neck_hard")
     parser.add_argument("--threshold", type=float, default=0.3, help="시각화용 confidence 임계값")
     parser.add_argument("--labels", action="store_true", help="각 keypoint 점 옆에 이름을 표시 (어떤 점이 어떤 keypoint인지 눈으로 확인용)")
     parser.add_argument("--log", type=str, default=None, help="keypoint별 confidence를 저장할 CSV 경로")
@@ -801,6 +808,14 @@ def main():
         teacher_writer = csv.writer(teacher_file)
         teacher_writer.writerow(teacher_header())
     source = _RealSenseSource(args.fps) if args.realsense else _WebcamSource(args.camera)
+    raw_recorder = None
+    if args.save_raw:
+        if not args.realsense:
+            raise SystemExit("--save-raw는 --realsense와 함께 써야 합니다.")
+        from src.capture.raw_recorder import RawRgbdRecorder
+        raw_recorder = RawRgbdRecorder(args.save_raw)
+        source.attach_raw_recorder(raw_recorder)
+        print(f"RGB·Depth 원본을 {args.save_raw} 에 저장합니다(카운트다운 제외).")
 
     log_file = None
     log_writer = None
@@ -896,6 +911,8 @@ def main():
                 continue
             run_elapsed = time.time() - run_start_t
             in_countdown = run_elapsed < args.countdown
+            if raw_recorder is not None:
+                raw_recorder.active = not in_countdown
             if args.duration > 0 and run_elapsed - args.countdown >= args.duration:
                 print(f"--duration {args.duration:g}초 경과: 자동 종료합니다.")
                 break
@@ -1216,6 +1233,8 @@ def main():
                     print(f"자세 지시: \"{instruction}\"")
     finally:
         source.release()
+        if raw_recorder is not None:
+            print(f"원본 저장 완료: {args.save_raw} ({raw_recorder.close()}프레임)")
         cv2.destroyAllWindows()
         if args.depth_refine:
             print(f"depth 기반 keypoint 보정: 옮겨진 점 누적 {refine_count}개")

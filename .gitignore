@@ -44,3 +44,6 @@ __pycache__/
 .pytest_cache/
 
 data/side_gt/*.jpg
+
+# 얼굴이 들어간 RGB-D 원본(IRB 제공용) - git 제외
+data/raw_rgbd/
