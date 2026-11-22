@@ -8,7 +8,7 @@
 
 - [ ] **촬영 가능 인원은 p01, p02 두 명뿐이다(새 참가자 없음).** 그래서 새 참가자 촬영(예전 §2)은 하지 않고, 두 사람의 데이터를 보강하는 데 쓴다.
 - [ ] 카메라를 **환경 1(p02, p03을 찍은 구도)과 같은 자리·높이·각도**로 고정한다. 구도가 다르면 기존 7-class 데이터와 합칠 수 없다. 고정한 뒤 정상 자세로 5초 찍어 `data/_check.csv`로 몸통 길이 비를 확인한다(p02, p03은 1.05~1.14, 재촬영 p01은 0.71이라 합칠 수 없었다).
-- [ ] `git pull`, `python -m pytest -q` (93개 통과가 정상).
+- [ ] `git pull`, `python -m pytest -q` (95개 통과가 정상).
 - [ ] 촬영 동의 확인. 사진과 `data/snaps/`는 git에 올리지 않는다.
 
 - [ ] **p03은 추가 촬영을 하지 않을 수 있다.** 이번 촬영분(긴 정상 녹화, 손 동작, 좌우 재촬영, p01 v4)에는 p03이 없으므로, 새 데이터로 계산한 오경고율·좌우 결과는 **p01, p02 두 명 기준으로 따로 보고**하고 3명 결과와 섞지 않는다. 기존 p03 로그는 7-class 분석에 그대로 쓴다.
@@ -72,6 +72,19 @@ python -m src.pose.movenet_keypoints --model models/movenet_lightning_int8.tflit
 bad_posture(back_neck, chin, slouch)는 공통 6개에 없으므로 공유본에서 뺀다. 우리 7-class 결과와 섞지 않도록 공유본은 6-class로 따로 이름 붙인다.
 공유 형식(로그 CSV인지 사진인지)과 IRB 범위는 공유 전에 확인한다. 사진만 주면 우리 깊이 특징은 쓸 수 없다.
 
+## 4-1. 자원 측정 (11/19 추가, 약 25분)
+
+4.7 재측정(전원 모드 기록이 없었음)과 양자화 비교(Lightning INT8 대 FP16)를 같은 조건에서 한 번에 한다. 촬영(§2~§4)이 끝난 뒤 한다.
+- [ ] `models/movenet_lightning_fp16.tflite`가 있는지 확인(Kaggle의 singlepose-lightning-tflite-float16, 이름을 이렇게 바꿔 둔다).
+- [ ] 전원 모드 **성능 모드**, 충전기 연결, 다른 프로그램 종료. 기록란에 전원 모드를 적는다.
+- [ ] 카메라 앞에서 정상 자세로 앉아 아래를 4회 반복한다(회당 약 6분, 5조건 × 70초):
+```
+python -m scripts.measure_resources --seconds 60 --conditions base roi refine both fp16 --out experiments/resource_pm_run1.md
+```
+  (`run1`을 `run2`, `run3`, `run4`로 바꿔 가며 실행)
+- [ ] 요약: `python -m scripts.summarize_resources experiments/resource_pm_run1.md experiments/resource_pm_run2.md experiments/resource_pm_run3.md experiments/resource_pm_run4.md --out experiments/resource_pm_summary.md`
+- 처음 FP16 조건이 바로 끝나면(샘플 0개) `data/resource_logs/stderr_fp16.txt`를 확인한다.
+
 ## 5. 시간이 남으면
 
 - [ ] 측면 정답 비교(휴대폰 삼각대, `docs/camera_day_checklist_1015.md` §3)
@@ -88,11 +101,12 @@ bad_posture(back_neck, chin, slouch)는 공통 6개에 없으므로 공유본에
 - 카메라 높이·각도:
 - 조명·시간대:
 - 참가자와 촬영 순서:
-- 좌우 기울임 정의(다른 조와 합의한 한 줄):
+- 좌우 기울임 정의(다른 조와 합의한 한 줄): 공유용(P3, P4)은 수치 기준 없이 각 팀이 자연스럽게 몸을 좌우로 기울인 자세이고 목은 내밀지 않는다. 우리 조 자체 자세(left_lean_neck, right_lean_neck)는 우리가 정한 대로 옆으로 기대면서 고개를 내민다(11/17 기안 확인).
 - IRB 승인 전 촬영분: 시험용(분석·제공 제외)으로 결정, 승인일과 승인 후 촬영 일정:
 - 앱 실행 검증 결과(알림 시각·종류):
+- 자원 측정 전원 모드·충전기 연결 여부:
 - 이상 현상·메모:
 
 ## 다 못 했을 때 자르는 순서
 
-5 → 4(p02) → 3 순. **§1(앱 검증)과 §2(정상 보강)는 반드시.**
+5 → 4(p02) → 3 순. **§1(앱 검증)과 §2(정상 보강)는 반드시.** §4-1(자원 측정)은 카메라만 있으면 혼자 할 수 있으니, 시간이 모자라면 p02가 간 뒤에 한다.

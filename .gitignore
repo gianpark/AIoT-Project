@@ -47,3 +47,6 @@ data/side_gt/*.jpg
 
 # 얼굴이 들어간 RGB-D 원본(IRB 제공용) - git 제외
 data/raw_rgbd/
+# 11/19 촬영 로그(숫자만, 얼굴 사진 없음) - 정상 보강·좌우 기울임, p01 v4 재촬영
+!data/side_1119/*.csv
+!data/side_p01_v4/*.csv

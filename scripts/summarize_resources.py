@@ -31,7 +31,7 @@ def main(argv: list[str]) -> None:
         out_path = paths[i + 1]
         del paths[i:i + 2]
     runs = [parse(Path(p)) for p in paths]
-    conds = [c for c in ("base", "roi", "refine", "both", "thunder", "dual") if all(c in r for r in runs)]
+    conds = [c for c in ("base", "roi", "refine", "both", "fp16", "thunder", "dual") if all(c in r for r in runs)]
     out = [f"# 파이프라인 리소스 반복 측정 요약 ({len(runs)}회, 평균 ± SD)", "",
            "| 조건 | 실효 fps | CPU %(코어 1개) | CPU %(전체 대비) | RAM MB | fps 회차별 |", "|---|---|---|---|---|---|"]
     for c in conds:

@@ -27,9 +27,11 @@ import pandas as pd
 import psutil
 
 OPTS = {"base": [], "roi": ["--roi-crop"], "refine": ["--depth-refine"], "both": ["--roi-crop", "--depth-refine"],
-        "thunder": [], "dual": []}
-DEFAULT_CONDITIONS = ["base", "roi", "refine", "both"]   # 기존 4조건. thunder/dual은 --conditions로 지정할 때만
+        "thunder": [], "dual": [], "fp16": []}
+DEFAULT_CONDITIONS = ["base", "roi", "refine", "both"]   # 기존 4조건. thunder/dual/fp16은 --conditions로 지정할 때만
 THUNDER_MODEL = "models/movenet_thunder_int8.tflite"
+FP16_MODEL = "models/movenet_lightning_fp16.tflite"
+# fp16: 주 모델만 Lightning FP16으로 바꾼 base 파이프라인(양자화 비교: INT8 base 대 FP16). 옵션은 base와 같다
 # thunder: 주 모델을 Thunder로 바꾼 전체 파이프라인 / dual: Lightning 주 모델 + 같은 프레임에 Thunder 동시 추론(teacher 기록)
 WARMUP = 10.0
 
@@ -39,6 +41,10 @@ def run_condition(name: str, model: str, seconds: float, out_dir: Path) -> dict:
     extra = list(OPTS[name])
     if name == "thunder":
         model = THUNDER_MODEL
+    elif name == "fp16":
+        model = FP16_MODEL
+        if not Path(model).exists():
+            raise SystemExit(f"{model} 이 없습니다. Kaggle의 singlepose-lightning-tflite-float16 파일을 이 이름으로 models/에 두세요.")
     elif name == "dual":
         extra += ["--teacher-model", THUNDER_MODEL, "--teacher-log", str(out_dir / "res_dual_teacher.csv"), "--overwrite"]
     cmd = [sys.executable, "-m", "src.pose.movenet_keypoints", "--model", model, "--realsense", "--judge",
