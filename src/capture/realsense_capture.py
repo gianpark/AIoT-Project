@@ -121,16 +121,31 @@ class RealSenseCamera:
         self.raw_sink = None
 
     def cam_info(self) -> dict:
-        """원본 저장 메타데이터용 카메라 정보(해상도·fps·depth_scale·color 내부 파라미터)."""
+        """원본 저장 메타데이터용 카메라 정보(해상도·fps·depth_scale·내부/외부 파라미터·왜곡계수·기기 정보)."""
         info = {"width": self.width, "height": self.height, "fps_requested": self.fps,
                 "depth_scale": getattr(self, "depth_scale", None)}
+        def _intr(i):
+            return {"fx": i.fx, "fy": i.fy, "ppx": i.ppx, "ppy": i.ppy, "width": i.width, "height": i.height,
+                    "distortion_model": str(i.model).split(".")[-1], "distortion_coeffs": list(i.coeffs)}
+
         try:
-            intr = self._profile.get_stream(rs.stream.color).as_video_stream_profile().get_intrinsics()
-            info["color_intrinsics"] = {"fx": intr.fx, "fy": intr.fy, "ppx": intr.ppx, "ppy": intr.ppy,
-                                        "width": intr.width, "height": intr.height}
-            info["device_serial"] = self._profile.get_device().get_info(rs.camera_info.serial_number)
-        except Exception:  # noqa: BLE001 - 메타데이터 실패가 촬영을 막으면 안 된다
-            pass
+            cs = self._profile.get_stream(rs.stream.color).as_video_stream_profile()
+            ds = self._profile.get_stream(rs.stream.depth).as_video_stream_profile()
+            info["color_intrinsics"] = _intr(cs.get_intrinsics())
+            info["depth_intrinsics_native"] = _intr(ds.get_intrinsics())
+            ex = ds.get_extrinsics_to(cs)
+            info["depth_to_color_extrinsics"] = {"rotation_col_major_3x3": list(ex.rotation),
+                                                 "translation_m": list(ex.translation)}
+            info["aligned_depth_note"] = ("저장된 depth는 color에 정렬돼 color_intrinsics를 쓴다. "
+                                          "depth_intrinsics_native와 외부 파라미터는 참고용(정렬 전 센서 기준).")
+            info["color_fps_actual_profile"] = cs.fps()
+            dev = self._profile.get_device()
+            info["device_name"] = dev.get_info(rs.camera_info.name)
+            info["device_serial"] = dev.get_info(rs.camera_info.serial_number)
+            info["firmware_version"] = dev.get_info(rs.camera_info.firmware_version)
+            info["librealsense_version"] = getattr(rs, "__version__", None)
+        except Exception as exc:  # noqa: BLE001 - 메타데이터 실패가 촬영을 막으면 안 된다
+            info["cam_info_error"] = str(exc)
         return info
 
     def configure_filters(self, use_spatial: bool = True, use_temporal: bool = True,
@@ -205,8 +220,16 @@ class RealSenseCamera:
             return None
 
         if self.raw_sink is not None and self.raw_sink.active:
+            try:
+                domain = str(color_frame.get_frame_timestamp_domain()).split(".")[-1]
+            except Exception:  # noqa: BLE001
+                domain = ""
             self.raw_sink.put(color_frame.get_timestamp(), np.asanyarray(color_frame.get_data()),
-                              np.asanyarray(depth_frame.get_data()))
+                              np.asanyarray(depth_frame.get_data()),
+                              {"color_frame_number": color_frame.get_frame_number(),
+                               "depth_frame_number": depth_frame.get_frame_number(),
+                               "depth_timestamp_ms": depth_frame.get_timestamp(),
+                               "timestamp_domain": domain})
 
         if self.use_filters:
             if self.use_spatial:
