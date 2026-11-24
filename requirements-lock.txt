@@ -1,0 +1,56 @@
+# 저사양 노트북 등 다른 PC에서 기안 노트북과 같은 패키지 버전을 맞추기 위한 고정 목록
+# 기안 노트북 .venv(Python 3.14.3)에 설치된 버전 그대로 (2026-11-24 생성)
+# 설치: python -m pip install -r requirements-lock.txt
+# tensorflow는 정식판이 아닌 2.22.0rc0이다(Python 3.14용으로 설치되어 있던 버전).
+
+absl_py==2.5.1
+astunparse==1.6.3
+certifi==2026.7.22
+charset_normalizer==3.5.2
+cloudpickle==3.1.2
+colorama==0.4.6
+et_xmlfile==2.0.0
+flatbuffers==25.12.19
+gast==0.7.0
+google_pasta==0.2.0
+grpcio==1.84.0
+h5py==3.15.1
+idna==3.20
+iniconfig==2.3.1
+joblib==1.6.0
+keras_nightly==3.16.0.dev2026101404
+libclang==18.1.1
+markdown_it_py==4.2.0
+mdurl==0.1.2
+ml_dtypes==0.6.0
+namex==0.1.0
+narwhals==2.29.0
+numpy==2.4.4
+opencv_python==4.13.0.92
+openpyxl==3.1.5
+opt_einsum==3.4.0
+optree==0.20.0
+packaging==26.3
+pandas==3.0.6
+pillow==12.3.0
+pluggy==1.6.0
+protobuf==7.36.2
+psutil==7.2.2
+pycryptodomex==3.24.2
+pygments==2.21.0
+pyrealsense2==2.59.1.11053
+pytest==9.1.1
+python_dateutil==2.9.0.post0
+pyzipper==0.4.0
+requests==2.34.2
+rich==15.0.0
+scikit_learn==1.8.0
+scipy==1.18.1
+six==1.17.0
+tensorflow==2.22.0rc0
+termcolor==3.3.0
+threadpoolctl==3.7.0
+typing_extensions==4.16.0
+tzdata==2026.5
+urllib3==2.8.0
+wrapt==2.5.1

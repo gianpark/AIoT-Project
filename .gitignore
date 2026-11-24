@@ -53,3 +53,7 @@ data/raw_rgbd/
 # 11/19 촬영 로그(숫자만, 얼굴 사진 없음) - 정상 보강·좌우 기울임, p01 v4 재촬영
 !data/side_1119/*.csv
 !data/side_p01_v4/*.csv
+
+# 11/24 저사양 노트북 측정용: 앱이 쓰는 Lightning 두 개(INT8 2.9MB, FP16 4.8MB)만 git에 올린다 (Thunder는 계속 제외)
+!models/movenet_lightning_int8.tflite
+!models/movenet_lightning_fp16.tflite
