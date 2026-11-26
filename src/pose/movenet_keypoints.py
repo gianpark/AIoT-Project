@@ -86,6 +86,7 @@ except ImportError as exc:  # pragma: no cover
 from src.features.posture_features import compute_depth_features, compute_posture_features
 from src.logic.decision import (CAUTION, NORMAL, WARNING, AlertStateMachine, ProximityEstimator, judge,
                                 shoulder_width_ratio)
+from src.logic.personal_calibration import PersonalPostureCalibrator
 
 DEPTH_FEATURE_KEYS = [
     "head_depth_m", "chest_depth_m", "hip_depth_m",
@@ -707,6 +708,8 @@ def main():
     parser.add_argument("--judge", action="store_true",
                          help="자세·거리 판정(정상/주의/경고 + 화면 근접)을 화면에 표시하고, 샘플 주기마다 알림 조건을 "
                               "검사해 터미널에 출력한다 (5주차 판정 로직 1차 통합, src/logic/decision.py)")
+    parser.add_argument("--personal-calibration", action="store_true",
+                         help="--judge와 함께 사용: c 키로 정상 앉은 자세를 150회 샘플링해 세션 개인 보정을 수행한다")
     parser.add_argument("--caution-alert", action="store_true",
                          help="--judge에서 주의 이상이 연속 3회(5초 간격) 이어지면 종류를 말하지 않는 약한 'caution' 알림을 추가한다 "
                               "(11/6 오프라인 평가: 환경 1 검출 +15~30%%p, 정상 오경고 0%%. 앱 실사용 검증 전)")
@@ -890,6 +893,12 @@ def main():
 
     alert_machine = AlertStateMachine(caution_alert=args.caution_alert) if args.judge else None
     proximity_estimator = ProximityEstimator()
+    personal_calibrator = (PersonalPostureCalibrator()
+                           if args.judge and args.personal_calibration else None)
+    personal_calibration_last_sample_t = 0.0
+    PERSONAL_CALIBRATION_SAMPLE_INTERVAL = 0.15  # 연속 프레임 과대표집 완화
+    if args.personal_calibration and not args.judge:
+        print("개인 자세 보정은 --judge 옵션과 함께 사용해야 합니다.")
     last_sample_t = None
     from src.pose.side_view import SideViewSmoother
     body_smoother, arm_smoother = SideViewSmoother(), SideViewSmoother()  # 측면 뷰 떨림 완화(EMA)
@@ -1078,7 +1087,32 @@ def main():
                     valid = [v for v in (depth_features.get("chest_depth_m"), depth_features.get("head_depth_m")) if v]
                     ref_depth = depth_features.get("chest_depth_m") or (valid[0] if valid else None)
                 proximity_estimator.update(sh_w, ref_depth)  # depth 유효 시 k=어깨너비*거리 학습
-                judgement = judge(keypoints, depth_features,
+
+                # 개인 보정은 사용자가 c 키를 눌렀을 때만 시작한다.
+                # 코와 양쪽 어깨의 검출 신뢰도가 충분하고 깊이 특징값이 유효할 때만 수집한다.
+                judge_features = depth_features
+                if personal_calibrator is not None:
+                    now_cal = time.time()
+                    if personal_calibrator.is_collecting and depth_features:
+                        nf_value = depth_features.get("neck_forward_offset_m")
+                        confidence_ok = min(keypoints[0].score, keypoints[5].score,
+                                            keypoints[6].score) >= 0.50
+                        depth_ok = not bool(depth_features.get("near_invalid"))
+                        if (confidence_ok and depth_ok and nf_value is not None
+                                and now_cal - personal_calibration_last_sample_t >= PERSONAL_CALIBRATION_SAMPLE_INTERVAL):
+                            if personal_calibrator.add_sample(nf_value):
+                                personal_calibration_last_sample_t = now_cal
+                                if personal_calibrator.is_calibrated:
+                                    print("개인 자세 보정 완료: "
+                                          f"baseline={personal_calibrator.baseline_nf_m:.3f} m, "
+                                          f"offset={personal_calibrator.offset_m:+.3f} m")
+                    judge_features = personal_calibrator.apply(depth_features)
+                    cv2.putText(frame, personal_calibrator.status_text(), (10, frame.shape[0] - 42),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                                (0, 255, 170) if personal_calibrator.is_calibrated else (0, 220, 255),
+                                2, cv2.LINE_AA)
+
+                judgement = judge(keypoints, judge_features,
                                   fallback_depth_m=proximity_estimator.estimate_depth(sh_w),
                                   frame_aspect=frame.shape[1] / frame.shape[0])
                 color = {NORMAL: (0, 255, 170), CAUTION: (0, 200, 255), WARNING: (0, 0, 255)}[judgement.posture_level]
@@ -1185,6 +1219,11 @@ def main():
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
                 break
+            if key == ord("c") and personal_calibrator is not None:
+                personal_calibrator.start()
+                personal_calibration_last_sample_t = 0.0
+                print("개인 자세 보정 시작: 화면을 보며 평소의 바른 앉은 자세를 유지하세요. "
+                      "150개 유효 샘플을 수집합니다.")
             if key == ord("r") and auto_calibrate:
                 calibrated = False
                 roi_rect = None
