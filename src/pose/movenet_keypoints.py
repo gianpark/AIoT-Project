@@ -1105,11 +1105,18 @@ def main():
                                 if personal_calibrator.is_calibrated:
                                     print("개인 자세 보정 완료: "
                                           f"baseline={personal_calibrator.baseline_nf_m:.3f} m, "
-                                          f"offset={personal_calibrator.offset_m:+.3f} m")
+                                          f"offset={personal_calibrator.offset_m:+.3f} m"
+                                          + (" (이동 폭 상한 적용)" if personal_calibrator.is_clipped else ""))
+                                elif personal_calibrator.is_rejected:
+                                    print("개인 자세 보정 거부: 수집 중 자세가 흔들렸습니다 "
+                                          f"(10~90% 폭 {personal_calibrator.spread_m:.3f} m > "
+                                          f"{personal_calibrator.max_spread_m:.2f} m). "
+                                          "바른 자세로 가만히 앉아 c 키를 다시 눌러 주세요.")
                     judge_features = personal_calibrator.apply(depth_features)
                     cv2.putText(frame, personal_calibrator.status_text(), (10, frame.shape[0] - 42),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.55,
-                                (0, 255, 170) if personal_calibrator.is_calibrated else (0, 220, 255),
+                                (0, 255, 170) if personal_calibrator.is_calibrated
+                                else (0, 0, 255) if personal_calibrator.is_rejected else (0, 220, 255),
                                 2, cv2.LINE_AA)
 
                 judgement = judge(keypoints, judge_features,

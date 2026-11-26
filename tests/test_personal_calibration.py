@@ -18,9 +18,10 @@ def test_not_collecting_before_start():
 
 def test_median_and_offset():
     cal = PersonalPostureCalibrator(required_samples=5)
-    _fill(cal, [0.10, 0.20, 0.16, 0.18, 0.17])
+    _fill(cal, [0.16, 0.18, 0.17, 0.175, 0.165])
     assert cal.is_calibrated and not cal.is_collecting
     assert math.isclose(cal.baseline_nf_m, 0.17)
+    assert not cal.is_clipped and not cal.is_rejected
     assert math.isclose(cal.offset_m, 0.17 - 0.143)
 
 
@@ -55,3 +56,43 @@ def test_restart_discards_previous_calibration():
     _fill(cal, [0.15])
     cal.start()
     assert not cal.is_calibrated and cal.is_collecting and cal.sample_count == 0
+
+
+def test_unstable_collection_rejected():
+    cal = PersonalPostureCalibrator(required_samples=5)
+    _fill(cal, [0.10, 0.20, 0.16, 0.18, 0.17])  # 10~90% 폭 0.068 m > 0.04 m
+    assert cal.is_rejected and not cal.is_calibrated and not cal.is_collecting
+    assert cal.spread_m > 0.04
+    assert cal.apply({"neck_forward_offset_m": 0.2})["neck_forward_offset_m"] == 0.2
+    assert "press 'c' again" in cal.status_text()
+
+
+def test_restart_after_rejection():
+    cal = PersonalPostureCalibrator(required_samples=5)
+    _fill(cal, [0.10, 0.20, 0.16, 0.18, 0.17])
+    _fill(cal, [0.15] * 5)
+    assert cal.is_calibrated and not cal.is_rejected
+
+
+def test_offset_clipped_both_directions():
+    hi = PersonalPostureCalibrator(required_samples=3)
+    _fill(hi, [0.20] * 3)  # 이동량 0.057 m -> 0.03 m
+    assert hi.is_clipped and math.isclose(hi.offset_m, 0.03)
+    assert math.isclose(hi.apply({"neck_forward_offset_m": 0.20})["neck_forward_offset_m"], 0.17)
+    lo = PersonalPostureCalibrator(required_samples=3)
+    _fill(lo, [0.08] * 3)  # 이동량 -0.063 m -> -0.03 m
+    assert lo.is_clipped and math.isclose(lo.offset_m, -0.03)
+
+
+def test_guards_can_be_disabled():
+    cal = PersonalPostureCalibrator(required_samples=5, max_spread_m=None, max_offset_m=None)
+    _fill(cal, [0.10, 0.30, 0.25, 0.28, 0.27])
+    assert cal.is_calibrated and math.isclose(cal.offset_m, 0.27 - 0.143)
+
+
+def test_percentile_matches_numpy_default():
+    import numpy as np
+    from src.logic.personal_calibration import _percentile
+    xs = [0.12, 0.31, 0.05, 0.22, 0.18, 0.09, 0.27]
+    for q in (10, 50, 90):
+        assert math.isclose(_percentile(xs, q), float(np.percentile(xs, q)))

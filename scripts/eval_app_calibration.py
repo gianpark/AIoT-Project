@@ -43,7 +43,7 @@ def app_calibrate(nn: pd.DataFrame):
             if ok and cal.add_sample(r.neck_forward_offset_m):
                 last_t = t
                 used.append(idx)
-                if cal.is_calibrated:
+                if not cal.is_collecting:  # 완료 또는 거부
                     return cal, set(g.loc[:idx].index) | set(used), t, rejected / seen
             elif not ok:
                 rejected += 1
@@ -89,7 +89,7 @@ def main():
     res = {m: evaluate(D, m) for m in ("none", "offline", "app")}
     info = res["app"][1]
     L = ["# 앱 개인 보정(c 키) 재생 검증: p01~p07", "",
-         "- 대상 코드: src/logic/personal_calibration.py + movenet_keypoints.py 수집 조건(커밋 71de83e). 카메라 없이 녹화 로그로 재생.",
+         "- 대상 코드: src/logic/personal_calibration.py + movenet_keypoints.py 수집 조건(커밋 71de83e + 11/26 안정성 검사: 10~90% 폭 0.04 m 초과 시 거부, 이동 ±0.03 m 상한). 카메라 없이 녹화 로그로 재생. 거부된 사람은 보정 없음으로 채점.",
          "- 앱 방식은 normal 녹화를 이어 붙여 150개를 채운다(20초 녹화 하나로는 부족). 보정에 쓴 구간은 평가에서 빼고 300프레임 미만 녹화는 채점 안 함.",
          "- 평가 규칙은 eval_alert_level과 같음(5초 간격, 경고 연속 3회, 위상 10가지 평균). 좌우 lean_neck 제외.", "",
          "## 1. 사람별 보정값", "",
